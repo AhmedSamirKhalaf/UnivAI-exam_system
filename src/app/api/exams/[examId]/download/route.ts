@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Exam } from "@/models/Exam";
+import {
+  stripCorrectOption,
+  examToPlain,
+} from "@/lib/business-logic";
 
 export async function GET(
   _request: NextRequest,
@@ -15,19 +19,12 @@ export async function GET(
       return Response.json({ error: "Exam not found" }, { status: 404 });
     }
 
-    const payload = {
-      title: exam.title,
-      type: exam.type,
-      student_id: exam.student_id,
-      mark: exam.mark,
-      passed: exam.passed,
-      grading_status: exam.grading_status,
-      generated_questions: exam.generated_questions,
-      student_answers: exam.student_answers,
-      submitted_at: exam.updatedAt,
-    };
+    let plain = examToPlain(exam);
+    if (!exam.taken) {
+      plain = stripCorrectOption(plain);
+    }
 
-    return Response.json(payload, {
+    return Response.json(plain, {
       status: 200,
       headers: {
         "Content-Disposition": `attachment; filename="exam-${examId}.json"`,

@@ -69,7 +69,7 @@ const examSchema = new Schema<IExam>(
     invalidated_at: { type: Date },
     invalidation_notified_at: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 examSchema.index(
