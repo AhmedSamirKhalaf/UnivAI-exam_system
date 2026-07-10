@@ -32,7 +32,7 @@ const enrollmentSchema = new Schema<IEnrollment>(
       default: "active",
     },
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 enrollmentSchema.index(

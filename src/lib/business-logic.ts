@@ -184,17 +184,22 @@ export async function generateQuestions(
 /*   startQuiz — find-or-reset                                        */
 /* ------------------------------------------------------------------ */
 
+export interface StartResult {
+  exam: IExam;
+  created: boolean;
+}
+
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
   chapterId: string | mongoose.Types.ObjectId
-): Promise<IExam> {
+): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
 
   const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
   const chapterIdObj = new mongoose.Types.ObjectId(chapterId.toString());
 
-  let exam = await Exam.findOne({
+  const existing = await Exam.findOne({
     student_id: studentIdObj,
     chapter_id: chapterIdObj,
     type: "quiz",
@@ -202,20 +207,27 @@ export async function startQuiz(
 
   const title = `Quiz: ${chapter.title}`;
   const now = new Date();
-
   const questionCount = 5;
-  if (exam) {
-    exam.attempt_number = (exam.attempt_number || 0) + 1;
-    exam.generated_questions = await generateQuestions(chapter._id, questionCount, "quiz");
-    exam.student_answers = [];
-    exam.taken = false;
-    exam.mark = undefined;
-    exam.passed = false;
-    exam.grading_status = "auto_graded";
-    exam.integrity_status = "clean";
-    exam.invalidated_at = undefined;
-    exam.invalidation_notified_at = undefined;
-    await exam.save();
+  const questions = await generateQuestions(
+    chapter._id,
+    questionCount,
+    "quiz"
+  );
+
+  let exam: IExam;
+
+  if (existing) {
+    existing.attempt_number = (existing.attempt_number || 0) + 1;
+    existing.generated_questions = questions;
+    existing.student_answers = [];
+    existing.taken = false;
+    existing.mark = undefined;
+    existing.passed = false;
+    existing.grading_status = "auto_graded";
+    existing.integrity_status = "clean";
+    existing.invalidated_at = undefined;
+    existing.invalidation_notified_at = undefined;
+    exam = await existing.save();
 
     await ExamSession.deleteOne({ exam_id: exam._id });
     await ProctoringEvent.deleteMany({ exam_id: exam._id });
@@ -228,34 +240,35 @@ export async function startQuiz(
       flagged: false,
       status: "in_progress",
     });
-  } else {
-    const questions = await generateQuestions(chapter._id, questionCount, "quiz");
-    exam = await Exam.create({
-      type: "quiz",
-      title,
-      student_id: studentIdObj,
-      chapter_id: chapterIdObj,
-      attempt_number: 1,
-      generated_questions: questions,
-      student_answers: [],
-      taken: false,
-      passing_mark: 3,
-      passed: false,
-      grading_status: "auto_graded",
-      integrity_status: "clean",
-    });
 
-    await ExamSession.create({
-      exam_id: exam._id,
-      student_id: studentIdObj,
-      started_at: now,
-      suspicion_score: 0,
-      flagged: false,
-      status: "in_progress",
-    });
+    return { exam, created: false };
   }
 
-  return exam!;
+  exam = await Exam.create({
+    type: "quiz",
+    title,
+    student_id: studentIdObj,
+    chapter_id: chapterIdObj,
+    attempt_number: 1,
+    generated_questions: questions,
+    student_answers: [],
+    taken: false,
+    passing_mark: 3,
+    passed: false,
+    grading_status: "auto_graded",
+    integrity_status: "clean",
+  });
+
+  await ExamSession.create({
+    exam_id: exam._id,
+    student_id: studentIdObj,
+    started_at: now,
+    suspicion_score: 0,
+    flagged: false,
+    status: "in_progress",
+  });
+
+  return { exam, created: true };
 }
 
 /* ------------------------------------------------------------------ */
@@ -272,6 +285,16 @@ export async function startMid(
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
   const chapterIds = examChapters.map((ec) => ec.chapter_id);
+
+  if (chapterIds.length > 0) {
+    const chapter = await Chapter.findById(chapterIds[0]);
+    if (!chapter) throw new Error("Exam chapter lookup failed");
+    const enrolled = await isEnrolled(exam.student_id, chapter.curriculum_id);
+    if (!enrolled) {
+      throw new Error("Student is not enrolled in this curriculum");
+    }
+  }
+
   const count = Math.max(5, chapterIds.length * 3);
 
   exam.attempt_number = (exam.attempt_number || 0) + 1;
@@ -738,7 +761,12 @@ export async function gradeFinal(
     reason: reason || (isRegrade ? "regrade" : "initial grade"),
   });
 
+  if (exam.grading_status !== "pending_review") {
+    throw new Error("Exam is not pending review");
+  }
+
   exam.mark = mark;
+  exam.passed = mark >= 50;
   exam.grading_status = "graded";
   await exam.save();
 }

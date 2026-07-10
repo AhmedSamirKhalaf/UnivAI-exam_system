@@ -25,10 +25,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: check.reason }, { status: 403 });
     }
 
-    const exam = await startQuiz(student_id, chapter_id);
+    const { exam, created } = await startQuiz(student_id, chapter_id);
     const safeExam = stripCorrectOption(examToPlain(exam));
 
-    return Response.json(safeExam, { status: 200 });
+    return Response.json(safeExam, { status: created ? 201 : 200 });
   } catch (error: unknown) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

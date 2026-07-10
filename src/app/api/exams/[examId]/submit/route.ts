@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
-import { submitExam } from "@/lib/business-logic";
+import { submitExam, examToPlain } from "@/lib/business-logic";
 
 export async function POST(
   request: NextRequest,
@@ -20,7 +20,8 @@ export async function POST(
     }
 
     const exam = await submitExam(examId, student_answers);
-    return Response.json(exam, { status: 200 });
+    const plain = examToPlain(exam);
+    return Response.json(plain, { status: 200 });
   } catch (error: unknown) {
     return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
