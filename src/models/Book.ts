@@ -31,7 +31,7 @@ const bookSchema = new Schema<IBook>(
     },
     error_message: { type: String },
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 export const Book: Model<IBook> =

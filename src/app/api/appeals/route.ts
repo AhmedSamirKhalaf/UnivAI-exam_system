@@ -34,6 +34,14 @@ export async function POST(request: NextRequest) {
 
     return Response.json({ success: true }, { status: 200 });
   } catch (error: unknown) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Unknown error";
+    if (
+      message.includes("not found") ||
+      message.includes("Integrity status") ||
+      message.includes("must be")
+    ) {
+      return Response.json({ error: message }, { status: 400 });
+    }
+    return Response.json({ error: message }, { status: 500 });
   }
 }
