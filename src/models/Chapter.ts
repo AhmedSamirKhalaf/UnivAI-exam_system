@@ -19,7 +19,7 @@ const chapterSchema = new Schema<IChapter>(
     title: { type: String, required: true },
     number: { type: Number, required: true },
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 chapterSchema.index({ curriculum_id: 1, number: 1 });

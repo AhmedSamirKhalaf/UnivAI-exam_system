@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
 
     await processBook(book._id, student_id || undefined);
 
-    return Response.json(book, { status: 201 });
+    const updatedBook = await Book.findById(book._id);
+    return Response.json(updatedBook, { status: 201 });
   } catch (error: unknown) {
     return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
