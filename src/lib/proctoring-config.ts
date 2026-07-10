@@ -1,5 +1,6 @@
 export interface ProctoringConfig {
   faceDetectionIntervalMs: number;
+  faceDetectionExamTypes: string[];
   suspicionThreshold: number;
   faceScoreWeight: number;
   fullscreenExitWeight: number;
@@ -8,10 +9,13 @@ export interface ProctoringConfig {
   devtoolsWeight: number;
   multipleFacesWeight: number;
   duplicateEventWindowMs: number;
+  absenceScoreIntervalSeconds: number;
+  maxAbsenceEventWeight: number;
 }
 
 export const PROCTORING_CONFIG: ProctoringConfig = {
   faceDetectionIntervalMs: 3000,
+  faceDetectionExamTypes: ["mid", "final"],
   suspicionThreshold: 50,
   faceScoreWeight: 15,
   fullscreenExitWeight: 30,
@@ -20,4 +24,6 @@ export const PROCTORING_CONFIG: ProctoringConfig = {
   devtoolsWeight: 35,
   multipleFacesWeight: 25,
   duplicateEventWindowMs: 5000,
-} as const;
+  absenceScoreIntervalSeconds: 15,
+  maxAbsenceEventWeight: 60,
+};

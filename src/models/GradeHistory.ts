@@ -1,6 +1,6 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, Document } from "mongoose";
 
-export interface IGradeHistory {
+export interface IGradeHistory extends Document {
   _id: mongoose.Types.ObjectId;
   exam_id: mongoose.Types.ObjectId;
   mark: number;
@@ -14,7 +14,11 @@ export interface IGradeHistory {
 
 const gradeHistorySchema = new Schema<IGradeHistory>(
   {
-    exam_id: { type: Schema.Types.ObjectId, ref: "Exam", required: true },
+    exam_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Exam",
+      required: true,
+    },
     mark: { type: Number, required: true },
     graded_by: { type: String, required: true },
     graded_at: { type: Date, required: true },
@@ -27,4 +31,5 @@ const gradeHistorySchema = new Schema<IGradeHistory>(
 gradeHistorySchema.index({ exam_id: 1, graded_at: 1 });
 
 export const GradeHistory: Model<IGradeHistory> =
-  mongoose.models.GradeHistory || mongoose.model<IGradeHistory>("GradeHistory", gradeHistorySchema);
+  mongoose.models.GradeHistory ||
+  mongoose.model<IGradeHistory>("GradeHistory", gradeHistorySchema);

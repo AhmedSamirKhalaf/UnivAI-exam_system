@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const createMidSchema = z
   .object({
-    curriculum_id: z.string(),
+    curriculum_id: z.string().min(1),
     title: z.string().min(1),
     chapter_ids: z
       .array(z.string())

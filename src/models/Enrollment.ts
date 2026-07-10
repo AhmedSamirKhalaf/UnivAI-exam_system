@@ -1,8 +1,8 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, Document } from "mongoose";
 
 export type EnrollmentStatus = "active" | "completed" | "withdrawn";
 
-export interface IEnrollment {
+export interface IEnrollment extends Document {
   _id: mongoose.Types.ObjectId;
   student_id: mongoose.Types.ObjectId;
   curriculum_id: mongoose.Types.ObjectId;
@@ -14,8 +14,16 @@ export interface IEnrollment {
 
 const enrollmentSchema = new Schema<IEnrollment>(
   {
-    student_id: { type: Schema.Types.ObjectId, ref: "Student", required: true },
-    curriculum_id: { type: Schema.Types.ObjectId, ref: "Curriculum", required: true },
+    student_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Student",
+      required: true,
+    },
+    curriculum_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Curriculum",
+      required: true,
+    },
     enrolled_at: { type: Date, required: true },
     status: {
       type: String,
@@ -27,7 +35,11 @@ const enrollmentSchema = new Schema<IEnrollment>(
   { timestamps: true }
 );
 
-enrollmentSchema.index({ student_id: 1, curriculum_id: 1 }, { unique: true });
+enrollmentSchema.index(
+  { student_id: 1, curriculum_id: 1 },
+  { unique: true }
+);
 
 export const Enrollment: Model<IEnrollment> =
-  mongoose.models.Enrollment || mongoose.model<IEnrollment>("Enrollment", enrollmentSchema);
+  mongoose.models.Enrollment ||
+  mongoose.model<IEnrollment>("Enrollment", enrollmentSchema);

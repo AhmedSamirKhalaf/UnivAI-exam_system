@@ -8,7 +8,10 @@ export const examSchema = z.object({
   title: z.string().min(1),
   student_id: objectId,
   curriculum_id: objectId.optional(),
+  chapter_id: objectId.optional(),
   attempt_number: z.number().int().min(1).default(1),
+  generated_questions: z.any().optional(),
+  student_answers: z.any().optional(),
   taken: z.boolean().default(false),
   mark: z.number().optional(),
   passing_mark: z.number().min(0).optional(),
@@ -16,6 +19,11 @@ export const examSchema = z.object({
   grading_status: z
     .enum(["auto_graded", "pending_review", "graded"])
     .default("auto_graded"),
+  integrity_status: z
+    .enum(["clean", "invalidated"])
+    .default("clean"),
+  invalidated_at: z.coerce.date().optional(),
+  invalidation_notified_at: z.coerce.date().optional(),
 });
 
 export type ExamInput = z.infer<typeof examSchema>;
