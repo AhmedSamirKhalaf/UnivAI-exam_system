@@ -1,4 +1,4 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, Document } from "mongoose";
 
 export type SessionStatus = "in_progress" | "completed" | "terminated";
 export type TerminatedReason =
@@ -7,7 +7,7 @@ export type TerminatedReason =
   | "student_submitted"
   | "timeout";
 
-export interface IExamSession {
+export interface IExamSession extends Document {
   _id: mongoose.Types.ObjectId;
   exam_id: mongoose.Types.ObjectId;
   student_id: mongoose.Types.ObjectId;
@@ -23,8 +23,17 @@ export interface IExamSession {
 
 const examSessionSchema = new Schema<IExamSession>(
   {
-    exam_id: { type: Schema.Types.ObjectId, ref: "Exam", required: true, unique: true },
-    student_id: { type: Schema.Types.ObjectId, ref: "Student", required: true },
+    exam_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Exam",
+      required: true,
+      unique: true,
+    },
+    student_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Student",
+      required: true,
+    },
     started_at: { type: Date, required: true },
     ended_at: { type: Date },
     suspicion_score: { type: Number, required: true, default: 0 },
@@ -36,11 +45,17 @@ const examSessionSchema = new Schema<IExamSession>(
     },
     terminated_reason: {
       type: String,
-      enum: ["suspicion_threshold", "manual_admin_stop", "student_submitted", "timeout"],
+      enum: [
+        "suspicion_threshold",
+        "manual_admin_stop",
+        "student_submitted",
+        "timeout",
+      ],
     },
   },
   { timestamps: true }
 );
 
 export const ExamSession: Model<IExamSession> =
-  mongoose.models.ExamSession || mongoose.model<IExamSession>("ExamSession", examSessionSchema);
+  mongoose.models.ExamSession ||
+  mongoose.model<IExamSession>("ExamSession", examSessionSchema);

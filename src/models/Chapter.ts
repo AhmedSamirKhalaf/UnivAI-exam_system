@@ -1,6 +1,6 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, Document } from "mongoose";
 
-export interface IChapter {
+export interface IChapter extends Document {
   _id: mongoose.Types.ObjectId;
   curriculum_id: mongoose.Types.ObjectId;
   title: string;
@@ -11,7 +11,11 @@ export interface IChapter {
 
 const chapterSchema = new Schema<IChapter>(
   {
-    curriculum_id: { type: Schema.Types.ObjectId, ref: "Curriculum", required: true },
+    curriculum_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Curriculum",
+      required: true,
+    },
     title: { type: String, required: true },
     number: { type: Number, required: true },
   },
@@ -21,4 +25,5 @@ const chapterSchema = new Schema<IChapter>(
 chapterSchema.index({ curriculum_id: 1, number: 1 });
 
 export const Chapter: Model<IChapter> =
-  mongoose.models.Chapter || mongoose.model<IChapter>("Chapter", chapterSchema);
+  mongoose.models.Chapter ||
+  mongoose.model<IChapter>("Chapter", chapterSchema);

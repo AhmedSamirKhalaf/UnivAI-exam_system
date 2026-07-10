@@ -7,7 +7,9 @@ export const enrollmentSchema = z.object({
   student_id: objectId,
   curriculum_id: objectId,
   enrolled_at: z.coerce.date(),
-  status: z.enum(["active", "completed", "withdrawn"]).default("active"),
+  status: z
+    .enum(["active", "completed", "withdrawn"])
+    .default("active"),
 });
 
 export type EnrollmentInput = z.infer<typeof enrollmentSchema>;

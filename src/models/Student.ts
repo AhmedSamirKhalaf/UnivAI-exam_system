@@ -1,6 +1,6 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, Document } from "mongoose";
 
-export interface IStudent {
+export interface IStudent extends Document {
   _id: mongoose.Types.ObjectId;
   name: string;
   createdAt: Date;
@@ -15,4 +15,5 @@ const studentSchema = new Schema<IStudent>(
 );
 
 export const Student: Model<IStudent> =
-  mongoose.models.Student || mongoose.model<IStudent>("Student", studentSchema);
+  mongoose.models.Student ||
+  mongoose.model<IStudent>("Student", studentSchema);

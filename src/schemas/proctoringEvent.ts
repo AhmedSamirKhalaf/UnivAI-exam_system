@@ -18,6 +18,8 @@ export const proctoringEventSchema = z.object({
   score_at_event: z.number().min(0),
   occurrences: z.number().int().min(1).default(1),
   last_seen_at: z.coerce.date(),
+  duration_seconds: z.number().min(0).optional(),
+  ended_at: z.coerce.date().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
