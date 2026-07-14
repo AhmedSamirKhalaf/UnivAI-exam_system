@@ -1,89 +1,82 @@
 # Exam System
 
-A Next.js exam platform where users answer questions one at a time with sidebar navigation. Built with the App Router and the Next.js Route Handlers for API endpoints.
+A Next.js exam platform with question-by-question navigation, exam monitoring, and voice permission gating. Built with MUI, App Router, and Next.js Route Handlers.
 
 ## Project Structure
 
 ```
 app/
-  layout.tsx          - Root layout (html, body, metadata)
-  page.tsx            - Warning/start page with exam rules
-  globals.css         - All styles
+  layout.tsx              - Root layout
+  page.tsx                - Exam rules warning page
+  globals.css             - Minimal reset (all UI via MUI)
   components/
-    QuestionCard.tsx  - Renders a single MCQ question with radio buttons
-    QuestionList.tsx  - Sidebar list showing seen questions with answer status
+    QuestionCard.tsx      - Single MCQ question with radio buttons
+    QuestionList.tsx      - Sidebar: seen questions with answer checkmarks
+    EndExamDialog.tsx     - Confirmation dialog before ending exam
+    PermissionGate.tsx    - Mic permission request before exam starts
+  hooks/
+    useMonitor.ts         - Monitoring hook: camera, face detection, violations
   exam/
-    page.tsx          - Exam page: fetches questions, manages navigation & state
+    page.tsx              - Exam page with phases: permission → exam → ending
   result/
-    page.tsx          - Result page: submits answers, displays grade & breakdown
+    page.tsx              - Grade display with per-question breakdown
   data/
-    questions.ts      - Dummy question data (10 MCQ questions)
+    questions.ts          - 10 dummy MCQ questions with answers
   api/
     questions/
-      route.ts        - GET: returns questions without answers
+      route.ts            - GET: returns questions without answers
     end-exam/
-      route.ts        - POST: receives answers, returns grade & per-question results
+      route.ts            - POST: grades answers, returns results
+    violations/
+      route.ts            - POST: writes violations to violations.json in root
+violations.json           - Created on each exam end (overwritten each time)
 ```
 
 ## Pages
 
-| Route       | Description                                      |
-|-------------|--------------------------------------------------|
-| `/`         | Exam rules warning page with a "Start Exam" button |
-| `/exam`     | Exam page with question card and sidebar list    |
-| `/result`   | Shows grade, correct count, and per-question breakdown |
+| Route       | Description                                          |
+|-------------|------------------------------------------------------|
+| `/`         | Exam rules warning page with a "Start Exam" button   |
+| `/exam`     | Permission gate → exam with monitoring & violations   |
+| `/result`   | Grade, correct count, per-question breakdown         |
 
 ## API Endpoints
 
 ### `GET /api/questions`
-
 Returns all questions **without** correct answers.
 
-**Response:**
-```json
-[
-  {
-    "id": "q1",
-    "text": "What does HTML stand for?",
-    "options": [
-      { "label": "Hyper Text Markup Language", "value": "a" },
-      ...
-    ]
-  },
-  ...
-]
-```
-
 ### `POST /api/end-exam`
+Receives answers, returns grade and per-question results.
 
-Receives user answers and returns the graded result.
+**Request:** `{ "answers": { "q1": "a", "q2": "b", ... } }`
 
-**Request:**
-```json
-{ "answers": { "q1": "a", "q2": "b", ... } }
-```
+### `POST /api/violations`
+Writes violations array to `violations.json` in the project root. Overwrites previous content on each call.
 
-**Response:**
-```json
-{
-  "grade": 70,
-  "correct": 7,
-  "total": 10,
-  "results": [
-    { "id": "q1", "text": "...", "correctAnswer": "a", "userAnswer": "a", "isCorrect": true },
-    ...
-  ]
-}
-```
+**Request:** `{ "violations": [{ "type": "...", "details": "...", "timestamp": "..." }, ...] }`
+
+## Monitoring
+
+The `useMonitor` hook tracks these violations during the exam:
+- `fullscreen_exit` — User left fullscreen
+- `tab_switch` — Tab hidden or window lost focus
+- `copy_paste` — Copy, cut, paste, or right-click attempted
+- `devtools_open` — DevTools shortcut or devtools detected
+- `face_not_detected` — No face visible in webcam
+- `multiple_faces` — More than one face detected
+- `camera_blocked` — Camera permission denied
+
+Each violation records a `type`, `details` string, and ISO `timestamp`. On exam end, all violations are POSTed to `/api/violations` and saved to `violations.json` in the project root (overwritten each time).
 
 ## How It Works
 
-1. User lands on `/`, reads the exam rules, and clicks **Start Exam**.
-2. `/exam` fetches questions from `GET /api/questions`. Only question 1 is shown initially.
-3. **Next** advances to the next question and adds it to the sidebar. **Previous** goes back.
-4. Clicking a question in the sidebar jumps directly to it. Answered questions show a checkmark.
-5. **End Exam** stores answers in `sessionStorage`, navigates to `/result`.
-6. `/result` sends answers to `POST /api/end-exam`, displays the grade and a per-question breakdown.
+1. User lands on `/`, reads exam rules, clicks **Start Exam**.
+2. `/exam` loads questions, then shows `PermissionGate` asking for mic access.
+3. User enables mic or skips (skip is logged as a violation).
+4. Exam starts: camera activates, face detection runs, browser events are monitored.
+5. Question navigation: **Next** / **Previous** / sidebar click. Answered questions show a checkmark.
+6. **End Exam** shows a confirmation dialog. On confirm: fullscreen exits, violations are saved, answers are submitted.
+7. `/result` displays the grade and per-question breakdown.
 
 ## Running
 

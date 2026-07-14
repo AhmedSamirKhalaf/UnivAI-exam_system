@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Container from "@mui/material/Container";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -11,23 +10,11 @@ import Button from "@mui/material/Button";
 import LinearProgress from "@mui/material/LinearProgress";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
-import Divider from "@mui/material/Divider";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CancelIcon from "@mui/icons-material/Cancel";
-
-interface GradedQuestion {
-  id: string;
-  text: string;
-  correctAnswer: string;
-  userAnswer: string | null;
-  isCorrect: boolean;
-}
 
 interface ExamResult {
   grade: number;
   correct: number;
   total: number;
-  results: GradedQuestion[];
 }
 
 export default function ResultPage() {
@@ -68,74 +55,48 @@ export default function ResultPage() {
 
   if (!result) {
     return (
-      <Container maxWidth="sm" sx={{ py: 4 }}>
+      <Box sx={{ p: 4 }}>
         <Alert severity="error">Something went wrong.</Alert>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 4 }}>
-      <Card variant="outlined">
-        <CardContent>
+    <Box sx={{ minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", p: 3 }}>
+      <Card variant="outlined" sx={{ maxWidth: 500, width: "100%" }}>
+        <CardContent sx={{ textAlign: "center", p: 4 }}>
           <Typography variant="h5" sx={{ fontWeight: 700 }} gutterBottom>
             Thank you for taking the exam!
           </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Your answers have been submitted.
+          </Typography>
 
-          <Box sx={{ textAlign: "center", my: 3 }}>
+          <Box sx={{ my: 3 }}>
             <Typography variant="h2" sx={{ fontWeight: 700 }} color="success.main">
-              {result.grade}%
+              {result.correct} / {result.total}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {result.correct} out of {result.total} correct
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              questions correct
             </Typography>
             <LinearProgress
               variant="determinate"
               value={result.grade}
               color={result.grade >= 60 ? "success" : "error"}
-              sx={{ mt: 2, height: 8, borderRadius: 4 }}
+              sx={{ mt: 3, height: 10, borderRadius: 5 }}
             />
           </Box>
-
-          <Divider sx={{ mb: 2 }} />
-
-          {result.results.map((r) => (
-            <Box key={r.id} sx={{ py: 1 }}>
-              <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
-                {r.isCorrect ? (
-                  <CheckCircleIcon fontSize="small" color="success" sx={{ mt: 0.3 }} />
-                ) : (
-                  <CancelIcon fontSize="small" color="error" sx={{ mt: 0.3 }} />
-                )}
-                <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {r.text}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {r.userAnswer
-                      ? `Your answer: ${r.userAnswer.toUpperCase()}`
-                      : "Skipped"}
-                    {" \u2014 "}Correct: {r.correctAnswer.toUpperCase()}
-                  </Typography>
-                </Box>
-              </Box>
-              <Divider sx={{ mt: 1 }} />
-            </Box>
-          ))}
 
           <Button
             variant="contained"
             fullWidth
             size="large"
-            sx={{ mt: 2 }}
             onClick={() => router.push("/")}
           >
             Back to Home
           </Button>
         </CardContent>
       </Card>
-    </Container>
+    </Box>
   );
 }
-
-
