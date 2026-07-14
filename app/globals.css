@@ -1,0 +1,335 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.card {
+  background: #1e293b;
+  border-radius: 0.75rem;
+  border: 1px solid #334155;
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.875rem 1.25rem;
+  border-bottom: 1px solid #334155;
+  background: #1a2332;
+}
+
+.card-header h2 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.card-body {
+  padding: 1.25rem;
+}
+
+.timer {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.question {
+  margin-bottom: 1.5rem;
+}
+
+.question:last-child {
+  margin-bottom: 0;
+}
+
+.q-text {
+  margin-bottom: 0.625rem;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+}
+
+label {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.375rem;
+  background: #0f172a;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+label:hover {
+  background: #1e293b;
+}
+
+input[type="radio"] {
+  margin-right: 0.5rem;
+}
+
+.written-answer {
+  width: 100%;
+  padding: 0.75rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.written-answer:focus {
+  outline: none;
+  border-color: #60a5fa;
+}
+
+.voice-hint {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+.voice-controls {
+  margin-bottom: 0.75rem;
+}
+
+.voice-progress .progress-bar {
+  margin-bottom: 0.375rem;
+}
+
+.voice-progress .voice-hint {
+  margin-bottom: 0;
+  font-size: 0.75rem;
+  text-align: center;
+  color: #60a5fa;
+}
+
+code {
+  background: #0f172a;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+  color: #fbbf24;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: #0f172a;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.status-label {
+  color: #94a3b8;
+}
+
+.indicator {
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.indicator-on { background: #065f46; color: #6ee7b7; }
+.indicator-off { background: #1e293b; color: #94a3b8; }
+.indicator-warn { background: #78350f; color: #fbbf24; }
+.indicator-alert { background: #7f1d1d; color: #fca5a5; }
+
+.badge {
+  padding: 0.2rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #334155;
+  color: #94a3b8;
+}
+
+.badge-idle { background: #334155; color: #94a3b8; }
+.badge-active { background: #065f46; color: #6ee7b7; }
+.badge-warn { background: #78350f; color: #fbbf24; }
+.badge-alert { background: #7f1d1d; color: #fca5a5; }
+
+.score {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #0f172a;
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6ee7b7, #fbbf24, #fca5a5);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+.verdict {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.verdict-clean { color: #6ee7b7; }
+.verdict-review { color: #fbbf24; }
+.verdict-fail { color: #fca5a5; }
+
+#video {
+  width: 100%;
+  border-radius: 0.5rem;
+  background: #0f172a;
+}
+
+.controls {
+  display: flex;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  min-width: 120px;
+}
+
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:active { transform: none; }
+
+.btn-primary { background: #2563eb; color: white; }
+.btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+
+.btn-danger { background: #dc2626; color: white; }
+.btn-danger:hover:not(:disabled) { background: #b91c1c; }
+
+.btn-secondary { background: #334155; color: #e2e8f0; }
+.btn-secondary:hover:not(:disabled) { background: #475569; }
+
+.log-section .card-body {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.violation-list {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+}
+
+.violation-item {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.375rem;
+  background: #0f172a;
+  border-radius: 0.375rem;
+  border-left: 3px solid #fbbf24;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.violation-item.alert {
+  border-left-color: #fca5a5;
+}
+
+.violation-time {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.violation-type {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.violation-item.alert .violation-type {
+  color: #fca5a5;
+}
+
+.violation-details {
+  color: #94a3b8;
+  font-size: 0.7rem;
+}
+
+.empty-state {
+  color: #475569;
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
