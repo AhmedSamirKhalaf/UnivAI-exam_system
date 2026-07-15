@@ -158,6 +158,8 @@ type BankQuestion = {
   type: "mcq" | "essay";
   options?: string[];
   correct_option?: string;
+  /** "lecture" = the lecturer said it out loud; "self_study" = book-only material */
+  source?: "lecture" | "self_study";
 };
 
 /**
@@ -217,25 +219,37 @@ export async function generateQuestions(
 ): Promise<Record<string, unknown>[]> {
   const chapterIds = Array.isArray(scope) ? scope : [scope];
 
-  // Draw evenly across the chapters in scope (a quiz has one; a mid has all).
-  const picked: BankQuestion[] = [];
+  const pool: BankQuestion[] = [];
   if (examType !== "final") {
-    const perChapter = Math.ceil(count / Math.max(1, chapterIds.length));
     for (const chapterId of chapterIds) {
-      picked.push(...sample(await bankQuestions(chapterId), perChapter));
+      pool.push(...(await bankQuestions(chapterId)));
     }
   }
 
-  if (!picked.length) {
+  if (!pool.length) {
     return placeholderQuestions(count, examType);
   }
 
-  return sample(picked, count).map((question, index) => ({
+  // At least 90% of every paper must be answerable from what the lecturer
+  // actually said; "self_study" questions (book material beyond the lecture)
+  // can NEVER exceed 10% of the paper. A 5-question quiz therefore carries
+  // none; the 12-question mid carries exactly one.
+  const selfPool = pool.filter((q) => q.source === "self_study");
+  const taughtPool = pool.filter((q) => q.source !== "self_study");
+  const selfCount = Math.min(selfPool.length, Math.floor(count * 0.1));
+
+  const picked = [
+    ...sample(taughtPool, count - selfCount),
+    ...sample(selfPool, selfCount),
+  ];
+
+  return sample(picked, picked.length).map((question, index) => ({
     question_id: `q_${index + 1}`,
     prompt: question.prompt,
     type: question.type,
     options: question.options,
     correct_option: question.correct_option,
+    source: question.source ?? "lecture",
   }));
 }
 
