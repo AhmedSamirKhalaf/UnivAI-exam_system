@@ -6,7 +6,6 @@ import AlertTitle from "@mui/material/AlertTitle";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
@@ -52,9 +51,9 @@ type Exam = {
   generated_questions?: Question[];
 };
 
-type Props = { examId: string };
+type Props = { examId: string; returnUrl: string };
 
-export default function ExamRunner({ examId }: Props) {
+export default function ExamRunner({ examId, returnUrl }: Props) {
   const [exam, setExam] = useState<Exam | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -151,44 +150,33 @@ export default function ExamRunner({ examId }: Props) {
   }
   if (!exam) return <CircularProgress />;
 
-  // ---------------------------------------------------------------- result view
+  // ---------------------------------------------------------------- submitted view
+  // No result is shown HERE: grading and the proctoring verdict live in UnivAI.
+  // The exam hall only confirms the hand-in and sends the student back.
   if (exam.taken) {
-    const total = exam.generated_questions?.length ?? 0;
     return (
       <Stack spacing={3}>
         <Typography variant="h4">{exam.title}</Typography>
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={2}>
-              <Typography variant="h6">Your result</Typography>
-              <Grid container spacing={1}>
-                <Grid>
-                  <Chip
-                    color={exam.passed ? "success" : "error"}
-                    label={exam.passed ? "PASSED" : "NOT PASSED"}
-                  />
-                </Grid>
-                <Grid>
-                  <Chip
-                    variant="outlined"
-                    label={`score: ${exam.mark ?? "—"} / ${total || "?"}`}
-                  />
-                </Grid>
-                {exam.passing_mark !== undefined ? (
-                  <Grid>
-                    <Chip variant="outlined" label={`pass mark: ${exam.passing_mark}`} />
-                  </Grid>
-                ) : null}
-                {exam.integrity_status === "invalidated" ? (
-                  <Grid>
-                    <Chip color="error" label="integrity: invalidated" />
-                  </Grid>
-                ) : null}
-              </Grid>
-              <Alert severity={exam.passed ? "success" : "info"}>
-                Your result has been sent back to UnivAI — you can close this tab and
-                check your dashboard.
+              <Typography variant="h6">Answers submitted</Typography>
+              <Alert severity="success">
+                Your answers and the proctoring report were sent to UnivAI. Your grade
+                will appear on your dashboard once it is recorded.
               </Alert>
+              <Grid container spacing={2}>
+                <Grid>
+                  <Button variant="contained" href={`${returnUrl}/exams`}>
+                    Back to UnivAI
+                  </Button>
+                </Grid>
+                <Grid>
+                  <Button variant="outlined" href={`${returnUrl}/dashboard`}>
+                    See your dashboard
+                  </Button>
+                </Grid>
+              </Grid>
             </Stack>
           </CardContent>
         </Card>

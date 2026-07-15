@@ -150,14 +150,44 @@ async function bumpSuspicionScore(
 }
 
 /* ------------------------------------------------------------------ */
-/*   Question generation (dummy)                                       */
+/*   Question generation — drawn from the per-chapter question bank    */
 /* ------------------------------------------------------------------ */
 
-export async function generateQuestions(
-  scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
-  count: number,
-  examType: "quiz" | "mid" | "final"
-): Promise<Record<string, unknown>[]> {
+type BankQuestion = {
+  prompt: string;
+  type: "mcq" | "essay";
+  options?: string[];
+  correct_option?: string;
+};
+
+/**
+ * UnivAI generates questions from the course book and stores them per chapter
+ * in the `question_banks` collection ({ chapter_id, questions }). Exams draw
+ * from there, so a quiz is actually about its lecture. The old placeholder
+ * generator survives only as a last resort for chapters with no bank.
+ */
+async function bankQuestions(
+  chapterId: mongoose.Types.ObjectId
+): Promise<BankQuestion[]> {
+  const db = mongoose.connection.db;
+  if (!db) return [];
+  const bank = await db
+    .collection("question_banks")
+    .findOne({ chapter_id: chapterId.toString() });
+  const questions = (bank?.questions ?? []) as BankQuestion[];
+  return questions.filter((q) => q.prompt && q.type);
+}
+
+function sample<T>(items: T[], count: number): T[] {
+  const pool = [...items];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
+function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
   const questions: Record<string, unknown>[] = [];
   for (let i = 1; i <= count; i++) {
     if (examType === "final" && i % 3 === 0) {
@@ -178,6 +208,35 @@ export async function generateQuestions(
     }
   }
   return questions;
+}
+
+export async function generateQuestions(
+  scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
+  count: number,
+  examType: "quiz" | "mid" | "final"
+): Promise<Record<string, unknown>[]> {
+  const chapterIds = Array.isArray(scope) ? scope : [scope];
+
+  // Draw evenly across the chapters in scope (a quiz has one; a mid has all).
+  const picked: BankQuestion[] = [];
+  if (examType !== "final") {
+    const perChapter = Math.ceil(count / Math.max(1, chapterIds.length));
+    for (const chapterId of chapterIds) {
+      picked.push(...sample(await bankQuestions(chapterId), perChapter));
+    }
+  }
+
+  if (!picked.length) {
+    return placeholderQuestions(count, examType);
+  }
+
+  return sample(picked, count).map((question, index) => ({
+    question_id: `q_${index + 1}`,
+    prompt: question.prompt,
+    type: question.type,
+    options: question.options,
+    correct_option: question.correct_option,
+  }));
 }
 
 /* ------------------------------------------------------------------ */
