@@ -264,7 +264,8 @@ export interface StartResult {
 
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
-  chapterId: string | mongoose.Types.ObjectId
+  chapterId: string | mongoose.Types.ObjectId,
+  requestedCount?: number
 ): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
@@ -280,7 +281,10 @@ export async function startQuiz(
 
   const title = `Quiz: ${chapter.title}`;
   const now = new Date();
-  const questionCount = 5;
+  // The caller (UnivAI's course-size dial) may scale the paper; pass mark
+  // stays proportional to the original 3-of-5.
+  const questionCount = Math.min(30, Math.max(3, Math.floor(requestedCount ?? 5)));
+  const passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
   const questions = await generateQuestions(
     chapter._id,
     questionCount,
@@ -296,6 +300,7 @@ export async function startQuiz(
     existing.taken = false;
     existing.mark = undefined;
     existing.passed = false;
+    existing.passing_mark = passingMark;
     existing.grading_status = "auto_graded";
     existing.integrity_status = "clean";
     existing.invalidated_at = undefined;
@@ -326,7 +331,7 @@ export async function startQuiz(
     generated_questions: questions,
     student_answers: [],
     taken: false,
-    passing_mark: 3,
+    passing_mark: passingMark,
     passed: false,
     grading_status: "auto_graded",
     integrity_status: "clean",
@@ -349,7 +354,8 @@ export async function startQuiz(
 /* ------------------------------------------------------------------ */
 
 export async function startMid(
-  examId: string | mongoose.Types.ObjectId
+  examId: string | mongoose.Types.ObjectId,
+  requestedCount?: number
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
   const exam = await Exam.findById(examIdObj);
@@ -368,7 +374,11 @@ export async function startMid(
     }
   }
 
-  const count = Math.max(5, chapterIds.length * 3);
+  const count = requestedCount
+    ? Math.min(60, Math.max(5, Math.floor(requestedCount)))
+    : Math.max(5, chapterIds.length * 3);
+  // Keep the pass bar proportional to the original 5-of-12.
+  exam.passing_mark = Math.max(1, Math.ceil(count * 0.4));
 
   exam.attempt_number = (exam.attempt_number || 0) + 1;
   exam.generated_questions = await generateQuestions(chapterIds, count, "mid");

@@ -7,14 +7,15 @@ import {
 } from "@/lib/business-logic";
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
     await connectDB();
     const { examId } = await params;
+    const body = await request.json().catch(() => ({}));
 
-    const exam = await startMid(examId);
+    const exam = await startMid(examId, body?.question_count);
     const safeExam = stripCorrectOption(examToPlain(exam));
 
     return Response.json(safeExam, { status: 200 });
