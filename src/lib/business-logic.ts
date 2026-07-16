@@ -150,14 +150,46 @@ async function bumpSuspicionScore(
 }
 
 /* ------------------------------------------------------------------ */
-/*   Question generation (dummy)                                       */
+/*   Question generation — drawn from the per-chapter question bank    */
 /* ------------------------------------------------------------------ */
 
-export async function generateQuestions(
-  scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
-  count: number,
-  examType: "quiz" | "mid" | "final"
-): Promise<Record<string, unknown>[]> {
+type BankQuestion = {
+  prompt: string;
+  type: "mcq" | "essay";
+  options?: string[];
+  correct_option?: string;
+  /** "lecture" = the lecturer said it out loud; "self_study" = book-only material */
+  source?: "lecture" | "self_study";
+};
+
+/**
+ * UnivAI generates questions from the course book and stores them per chapter
+ * in the `question_banks` collection ({ chapter_id, questions }). Exams draw
+ * from there, so a quiz is actually about its lecture. The old placeholder
+ * generator survives only as a last resort for chapters with no bank.
+ */
+async function bankQuestions(
+  chapterId: mongoose.Types.ObjectId
+): Promise<BankQuestion[]> {
+  const db = mongoose.connection.db;
+  if (!db) return [];
+  const bank = await db
+    .collection("question_banks")
+    .findOne({ chapter_id: chapterId.toString() });
+  const questions = (bank?.questions ?? []) as BankQuestion[];
+  return questions.filter((q) => q.prompt && q.type);
+}
+
+function sample<T>(items: T[], count: number): T[] {
+  const pool = [...items];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
+function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
   const questions: Record<string, unknown>[] = [];
   for (let i = 1; i <= count; i++) {
     if (examType === "final" && i % 3 === 0) {
@@ -180,6 +212,47 @@ export async function generateQuestions(
   return questions;
 }
 
+export async function generateQuestions(
+  scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
+  count: number,
+  examType: "quiz" | "mid" | "final"
+): Promise<Record<string, unknown>[]> {
+  const chapterIds = Array.isArray(scope) ? scope : [scope];
+
+  const pool: BankQuestion[] = [];
+  if (examType !== "final") {
+    for (const chapterId of chapterIds) {
+      pool.push(...(await bankQuestions(chapterId)));
+    }
+  }
+
+  if (!pool.length) {
+    return placeholderQuestions(count, examType);
+  }
+
+  // At least 90% of every paper must be answerable from what the lecturer
+  // actually said; "self_study" questions (book material beyond the lecture)
+  // can NEVER exceed 10% of the paper. A 5-question quiz therefore carries
+  // none; the 12-question mid carries exactly one.
+  const selfPool = pool.filter((q) => q.source === "self_study");
+  const taughtPool = pool.filter((q) => q.source !== "self_study");
+  const selfCount = Math.min(selfPool.length, Math.floor(count * 0.1));
+
+  const picked = [
+    ...sample(taughtPool, count - selfCount),
+    ...sample(selfPool, selfCount),
+  ];
+
+  return sample(picked, picked.length).map((question, index) => ({
+    question_id: `q_${index + 1}`,
+    prompt: question.prompt,
+    type: question.type,
+    options: question.options,
+    correct_option: question.correct_option,
+    source: question.source ?? "lecture",
+  }));
+}
+
 /* ------------------------------------------------------------------ */
 /*   startQuiz — find-or-reset                                        */
 /* ------------------------------------------------------------------ */
@@ -191,7 +264,8 @@ export interface StartResult {
 
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
-  chapterId: string | mongoose.Types.ObjectId
+  chapterId: string | mongoose.Types.ObjectId,
+  requestedCount?: number
 ): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
@@ -207,7 +281,10 @@ export async function startQuiz(
 
   const title = `Quiz: ${chapter.title}`;
   const now = new Date();
-  const questionCount = 5;
+  // The caller (UnivAI's course-size dial) may scale the paper; pass mark
+  // stays proportional to the original 3-of-5.
+  const questionCount = Math.min(30, Math.max(3, Math.floor(requestedCount ?? 5)));
+  const passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
   const questions = await generateQuestions(
     chapter._id,
     questionCount,
@@ -223,6 +300,7 @@ export async function startQuiz(
     existing.taken = false;
     existing.mark = undefined;
     existing.passed = false;
+    existing.passing_mark = passingMark;
     existing.grading_status = "auto_graded";
     existing.integrity_status = "clean";
     existing.invalidated_at = undefined;
@@ -253,7 +331,7 @@ export async function startQuiz(
     generated_questions: questions,
     student_answers: [],
     taken: false,
-    passing_mark: 3,
+    passing_mark: passingMark,
     passed: false,
     grading_status: "auto_graded",
     integrity_status: "clean",
@@ -276,7 +354,8 @@ export async function startQuiz(
 /* ------------------------------------------------------------------ */
 
 export async function startMid(
-  examId: string | mongoose.Types.ObjectId
+  examId: string | mongoose.Types.ObjectId,
+  requestedCount?: number
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
   const exam = await Exam.findById(examIdObj);
@@ -295,7 +374,11 @@ export async function startMid(
     }
   }
 
-  const count = Math.max(5, chapterIds.length * 3);
+  const count = requestedCount
+    ? Math.min(60, Math.max(5, Math.floor(requestedCount)))
+    : Math.max(5, chapterIds.length * 3);
+  // Keep the pass bar proportional to the original 5-of-12.
+  exam.passing_mark = Math.max(1, Math.ceil(count * 0.4));
 
   exam.attempt_number = (exam.attempt_number || 0) + 1;
   exam.generated_questions = await generateQuestions(chapterIds, count, "mid");

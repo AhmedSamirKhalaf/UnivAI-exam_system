@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { submitExam, examToPlain } from "@/lib/business-logic";
+import { sendResultWebhook } from "@/lib/report-webhook";
 
 export async function POST(
   request: NextRequest,
@@ -20,6 +21,11 @@ export async function POST(
     }
 
     const exam = await submitExam(examId, student_answers);
+
+    // Result + proctoring report go back to the UnivAI app. Fire-and-forget:
+    // a dead webhook must never break a student's submission.
+    void sendResultWebhook(exam);
+
     const plain = examToPlain(exam);
     return Response.json(plain, { status: 200 });
   } catch (error: unknown) {
