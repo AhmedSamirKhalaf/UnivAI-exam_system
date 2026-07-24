@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   try {
     await connectDB();
     const body = await request.json();
-    const { student_id, chapter_id, question_count } = body;
+    const { student_id, chapter_id, question_count, student_sid } = body;
 
     if (!student_id || !chapter_id) {
       return Response.json(
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: check.reason }, { status: 403 });
     }
 
-    const { exam, created } = await startQuiz(student_id, chapter_id, question_count);
+    const { exam, created } = await startQuiz(student_id, chapter_id, question_count, student_sid);
     const safeExam = stripCorrectOption(examToPlain(exam));
 
     return Response.json(safeExam, { status: created ? 201 : 200 });

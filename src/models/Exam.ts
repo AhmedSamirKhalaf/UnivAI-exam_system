@@ -9,6 +9,9 @@ export interface IExam extends Document {
   type: ExamType;
   title: string;
   student_id: mongoose.Types.ObjectId;
+  // The UnivAI app's tenant key (user.studentId). Echoed back in the result
+  // webhook so the app routes the grade to the right owner (multi-tenant).
+  student_sid?: string;
   curriculum_id?: mongoose.Types.ObjectId;
   chapter_id?: mongoose.Types.ObjectId;
   attempt_number: number;
@@ -39,6 +42,7 @@ const examSchema = new Schema<IExam>(
       ref: "Student",
       required: true,
     },
+    student_sid: { type: String },
     curriculum_id: {
       type: Schema.Types.ObjectId,
       ref: "Curriculum",

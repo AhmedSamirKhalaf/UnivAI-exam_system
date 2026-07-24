@@ -265,7 +265,8 @@ export interface StartResult {
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
   chapterId: string | mongoose.Types.ObjectId,
-  requestedCount?: number
+  requestedCount?: number,
+  studentSid?: string
 ): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
@@ -295,6 +296,7 @@ export async function startQuiz(
 
   if (existing) {
     existing.attempt_number = (existing.attempt_number || 0) + 1;
+    if (studentSid) existing.student_sid = studentSid;
     existing.generated_questions = questions;
     existing.student_answers = [];
     existing.taken = false;
@@ -326,6 +328,7 @@ export async function startQuiz(
     type: "quiz",
     title,
     student_id: studentIdObj,
+    student_sid: studentSid,
     chapter_id: chapterIdObj,
     attempt_number: 1,
     generated_questions: questions,
@@ -355,12 +358,14 @@ export async function startQuiz(
 
 export async function startMid(
   examId: string | mongoose.Types.ObjectId,
-  requestedCount?: number
+  requestedCount?: number,
+  studentSid?: string
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "mid") throw new Error("Exam is not a mid");
+  if (studentSid) exam.student_sid = studentSid;
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
   const chapterIds = examChapters.map((ec) => ec.chapter_id);

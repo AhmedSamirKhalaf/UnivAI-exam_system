@@ -23,6 +23,8 @@ export async function sendResultWebhook(exam: IExam): Promise<void> {
       type: exam.type,
       title: exam.title,
       student_id: exam.student_id.toString(),
+      // The UnivAI app's tenant key — routes this grade to the right owner.
+      student_sid: exam.student_sid ?? null,
       chapter_id: exam.chapter_id?.toString() ?? null,
       mark: exam.mark ?? null,
       total_questions: (exam.generated_questions ?? []).length,
