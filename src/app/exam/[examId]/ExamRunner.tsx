@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -15,8 +16,8 @@ import DialogTitle from "@mui/material/DialogTitle";
 import FormControl from "@mui/material/FormControl";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import FormLabel from "@mui/material/FormLabel";
-import Grid from "@mui/material/Grid";
 import LinearProgress from "@mui/material/LinearProgress";
+import Paper from "@mui/material/Paper";
 import Radio from "@mui/material/Radio";
 import RadioGroup from "@mui/material/RadioGroup";
 import Stack from "@mui/material/Stack";
@@ -24,11 +25,15 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 /**
- * The exam-taking screen. Pure MUI: no CSS files, no sx, no styled().
+ * The exam-taking screen. Pure MUI: no CSS files.
+ *
+ * Questions are fetched ONE AFTER ANOTHER (not in bulk). Each fetched question
+ * is cached on the client so the student can freely navigate between questions
+ * that have already been fetched. A left sidebar shows all question numbers;
+ * only fetched questions are clickable.
  *
  * Proctoring: leaving the tab, exiting fullscreen, and copy/paste are reported
- * to the proctoring API while the exam is open. The suspicion score they feed
- * lives on the exam session and comes back to the UnivAI app with the result.
+ * to the proctoring API while the exam is open.
  */
 
 type Question = {
@@ -38,7 +43,7 @@ type Question = {
   options?: string[];
 };
 
-type Exam = {
+type ExamMeta = {
   _id: string;
   type: "quiz" | "mid" | "final";
   title: string;
@@ -48,46 +53,129 @@ type Exam = {
   passing_mark?: number;
   passed: boolean;
   integrity_status: "clean" | "invalidated";
-  generated_questions?: Question[];
+  question_count: number;
 };
 
 type Props = { examId: string; returnUrl: string };
 
 export default function ExamRunner({ examId, returnUrl }: Props) {
-  const [exam, setExam] = useState<Exam | null>(null);
+  const [examMeta, setExamMeta] = useState<ExamMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
-  const examRef = useRef<Exam | null>(null);
 
-  const load = useCallback(async () => {
+  const [fetchedQuestions, setFetchedQuestions] = useState<Record<number, Question>>({});
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [fetchingQ, setFetchingQ] = useState(false);
+
+  const examMetaRef = useRef<ExamMeta | null>(null);
+  const fetchedRef = useRef<Record<number, Question>>({});
+  const fetchingSet = useRef<Set<number>>(new Set());
+
+  /* ------------------------------------------------------------------ */
+  /*   Data fetching                                                     */
+  /* ------------------------------------------------------------------ */
+
+  const loadExamMeta = useCallback(async () => {
     try {
       const res = await fetch(`/api/exams/${examId}`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not load the exam.");
-      setExam(data);
-      examRef.current = data;
+      setExamMeta(data);
+      examMetaRef.current = data;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the exam.");
     }
   }, [examId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const fetchQuestion = useCallback(
+    async (index: number): Promise<boolean> => {
+      if (fetchedRef.current[index]) return true;
+      if (fetchingSet.current.has(index)) return false;
 
-  /** Report a proctoring event. Never throws: proctoring must not break the exam. */
+      fetchingSet.current.add(index);
+      setFetchingQ(true);
+      try {
+        const res = await fetch(`/api/exams/${examId}?index=${index}`, {
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to fetch question.");
+
+        const q = data.generated_questions?.[0];
+        if (!q) throw new Error("No question returned.");
+
+        fetchedRef.current = { ...fetchedRef.current, [index]: q };
+        setFetchedQuestions({ ...fetchedRef.current });
+        return true;
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch question."
+        );
+        return false;
+      } finally {
+        fetchingSet.current.delete(index);
+        setFetchingQ(false);
+      }
+    },
+    [examId]
+  );
+
+  // Load exam metadata on mount, then kick off the first question fetch.
+  useEffect(() => {
+    loadExamMeta();
+  }, [loadExamMeta]);
+
+  useEffect(() => {
+    if (examMeta && examMeta.question_count > 0 && !fetchedRef.current[0]) {
+      fetchQuestion(0);
+    }
+  }, [examMeta, fetchQuestion]);
+
+  /* ------------------------------------------------------------------ */
+  /*   Auto-prefetch next question when the current one is answered      */
+  /* ------------------------------------------------------------------ */
+
+  const currentQ = fetchedQuestions[currentIndex];
+  const totalQuestions = examMeta?.question_count ?? 0;
+  const isLastQuestion = currentIndex >= totalQuestions - 1;
+
+  useEffect(() => {
+    if (!examMeta || !currentQ) return;
+    const answered = !!answers[currentQ.question_id]?.trim();
+    if (answered && !isLastQuestion) {
+      const nextIdx = currentIndex + 1;
+      if (!fetchedRef.current[nextIdx]) {
+        fetchQuestion(nextIdx);
+      }
+    }
+  }, [
+    answers,
+    currentQ,
+    currentIndex,
+    isLastQuestion,
+    examMeta,
+    fetchQuestion,
+  ]);
+
+  /* ------------------------------------------------------------------ */
+  /*   Proctoring                                                        */
+  /* ------------------------------------------------------------------ */
+
   const report = useCallback(
-    (type: "tab_switch" | "copy_paste" | "fullscreen_exit", metadata?: object) => {
-      const current = examRef.current;
-      if (!current || current.taken) return;
-      setWarnings((count) => count + 1);
+    (
+      type: "tab_switch" | "copy_paste" | "fullscreen_exit",
+      metadata?: object
+    ) => {
+      const meta = examMetaRef.current;
+      if (!meta || meta.taken) return;
+      setWarnings((c) => c + 1);
       fetch(`/api/exams/${examId}/proctoring-event`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, student_id: current.student_id, metadata }),
+        body: JSON.stringify({ type, student_id: meta.student_id, metadata }),
       }).catch(() => undefined);
     },
     [examId]
@@ -97,7 +185,8 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
     const onVisibility = () => {
       if (document.hidden) report("tab_switch");
     };
-    const onCopyPaste = (event: ClipboardEvent) => report("copy_paste", { kind: event.type });
+    const onCopyPaste = (e: ClipboardEvent) =>
+      report("copy_paste", { kind: e.type });
     const onFullscreen = () => {
       if (!document.fullscreenElement) report("fullscreen_exit");
     };
@@ -114,15 +203,44 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
     };
   }, [report]);
 
+  /* ------------------------------------------------------------------ */
+  /*   Navigation                                                        */
+  /* ------------------------------------------------------------------ */
+
+  const goNext = useCallback(async () => {
+    if (isLastQuestion) return;
+    const nextIdx = currentIndex + 1;
+    const ok = await fetchQuestion(nextIdx);
+    if (ok) setCurrentIndex(nextIdx);
+  }, [currentIndex, isLastQuestion, fetchQuestion]);
+
+  const goPrev = useCallback(() => {
+    if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
+  }, [currentIndex]);
+
+  const goToQuestion = useCallback(
+    (index: number) => {
+      if (fetchedRef.current[index]) setCurrentIndex(index);
+    },
+    []
+  );
+
+  /* ------------------------------------------------------------------ */
+  /*   Submit                                                            */
+  /* ------------------------------------------------------------------ */
+
   async function submit() {
-    if (!exam) return;
+    if (!examMeta) return;
     setSubmitting(true);
     setError(null);
     try {
-      const student_answers = (exam.generated_questions ?? []).map((question) => ({
-        question_id: question.question_id,
-        answer: answers[question.question_id] ?? "",
-      }));
+      const student_answers = Array.from(
+        { length: examMeta.question_count },
+        (_, i) => ({
+          question_id: `q_${i + 1}`,
+          answer: answers[`q_${i + 1}`] ?? "",
+        })
+      );
       const res = await fetch(`/api/exams/${examId}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -130,8 +248,15 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Submission failed.");
-      setExam(data);
-      examRef.current = data;
+
+      const updated: ExamMeta = {
+        ...examMeta,
+        taken: true,
+        mark: data.mark,
+        passed: data.passed,
+      };
+      setExamMeta(updated);
+      examMetaRef.current = updated;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submission failed.");
     } finally {
@@ -140,7 +265,11 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
     }
   }
 
-  if (error && !exam) {
+  /* ------------------------------------------------------------------ */
+  /*   Render – loading / error                                          */
+  /* ------------------------------------------------------------------ */
+
+  if (error && !examMeta) {
     return (
       <Alert severity="error">
         <AlertTitle>Could not open the exam</AlertTitle>
@@ -148,35 +277,32 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       </Alert>
     );
   }
-  if (!exam) return <CircularProgress />;
+  if (!examMeta) return <CircularProgress />;
 
-  // ---------------------------------------------------------------- submitted view
-  // No result is shown HERE: grading and the proctoring verdict live in UnivAI.
-  // The exam hall only confirms the hand-in and sends the student back.
-  if (exam.taken) {
+  /* ------------------------------------------------------------------ */
+  /*   Render – submitted view                                           */
+  /* ------------------------------------------------------------------ */
+
+  if (examMeta.taken) {
     return (
       <Stack spacing={3}>
-        <Typography variant="h4">{exam.title}</Typography>
+        <Typography variant="h4">{examMeta.title}</Typography>
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={2}>
               <Typography variant="h6">Answers submitted</Typography>
               <Alert severity="success">
-                Your answers and the proctoring report were sent to UnivAI. Your grade
-                will appear on your dashboard once it is recorded.
+                Your answers and the proctoring report were sent to UnivAI. Your
+                grade will appear on your dashboard once it is recorded.
               </Alert>
-              <Grid container spacing={2}>
-                <Grid>
-                  <Button variant="contained" href={`${returnUrl}/exams`}>
-                    Back to UnivAI
-                  </Button>
-                </Grid>
-                <Grid>
-                  <Button variant="outlined" href={`${returnUrl}/dashboard`}>
-                    See your dashboard
-                  </Button>
-                </Grid>
-              </Grid>
+              <Stack direction="row" spacing={2}>
+                <Button variant="contained" href={`${returnUrl}/exams`}>
+                  Back to UnivAI
+                </Button>
+                <Button variant="outlined" href={`${returnUrl}/dashboard`}>
+                  See your dashboard
+                </Button>
+              </Stack>
             </Stack>
           </CardContent>
         </Card>
@@ -184,102 +310,179 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
     );
   }
 
-  // ---------------------------------------------------------------- taking view
-  const questions = exam.generated_questions ?? [];
-  const answered = questions.filter((q) => (answers[q.question_id] ?? "").trim()).length;
+  /* ------------------------------------------------------------------ */
+  /*   Render – taking view                                              */
+  /* ------------------------------------------------------------------ */
+
+  const answeredCount = Object.values(answers).filter((a) => a.trim()).length;
 
   return (
     <Stack spacing={3}>
-      <Typography variant="h4">{exam.title}</Typography>
+      <Typography variant="h4">{examMeta.title}</Typography>
 
       <Alert severity="warning">
-        You are being proctored: leaving this tab, copy/paste, and exiting fullscreen
-        are recorded{warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
+        You are being proctored: leaving this tab, copy/paste, and exiting
+        fullscreen are recorded
+        {warnings
+          ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)`
+          : ""}
+        .
       </Alert>
 
-      <LinearProgress variant="determinate" value={(answered / Math.max(1, questions.length)) * 100} />
+      <LinearProgress
+        variant="determinate"
+        value={(answeredCount / Math.max(1, totalQuestions)) * 100}
+      />
       <Typography variant="body2" color="text.secondary">
-        {answered} of {questions.length} answered
+        {answeredCount} of {totalQuestions} answered
       </Typography>
 
-      {questions.map((question, index) => (
-        <Card key={question.question_id} variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="subtitle1">
-                {index + 1}. {question.prompt}
-              </Typography>
+      <Box sx={{ display: "flex", gap: 2 }}>
+        {/* ---- Left sidebar ---- */}
+        <Paper
+          variant="outlined"
+          sx={{
+            width: 180,
+            flexShrink: 0,
+            p: 1,
+            maxHeight: 500,
+            overflow: "auto",
+          }}
+        >
+          <Stack spacing={0.5}>
+            {Array.from({ length: totalQuestions }, (_, i) => {
+              const isFetched = !!fetchedQuestions[i];
+              const isCurrent = i === currentIndex;
+              const qId = `q_${i + 1}`;
+              const isAnswered = !!(
+                fetchedQuestions[i] && answers[qId]?.trim()
+              );
 
-              {question.type === "mcq" ? (
-                <FormControl>
-                  <FormLabel>Choose one</FormLabel>
-                  <RadioGroup
-                    value={answers[question.question_id] ?? ""}
-                    onChange={(event) =>
-                      setAnswers((previous) => ({
-                        ...previous,
-                        [question.question_id]: event.target.value,
-                      }))
-                    }
-                  >
-                    {(question.options ?? []).map((option) => (
-                      <FormControlLabel
-                        key={option}
-                        // Their grader compares against the leading letter ("A".."D").
-                        value={option.slice(0, 1)}
-                        control={<Radio />}
-                        label={option}
-                      />
-                    ))}
-                  </RadioGroup>
-                </FormControl>
-              ) : (
-                <TextField
-                  multiline
-                  minRows={4}
+              return (
+                <Button
+                  key={i}
+                  size="small"
                   fullWidth
-                  label="Your answer"
-                  value={answers[question.question_id] ?? ""}
-                  onChange={(event) =>
-                    setAnswers((previous) => ({
-                      ...previous,
-                      [question.question_id]: event.target.value,
-                    }))
-                  }
-                />
-              )}
-            </Stack>
-          </CardContent>
-        </Card>
-      ))}
+                  variant={isCurrent ? "contained" : "outlined"}
+                  disabled={!isFetched}
+                  onClick={() => goToQuestion(i)}
+                  sx={{
+                    justifyContent: "flex-start",
+                    minWidth: 0,
+                    textTransform: "none",
+                    ...(isCurrent
+                      ? {}
+                      : isAnswered
+                        ? { borderColor: "success.main", color: "success.main" }
+                        : {}),
+                  }}
+                >
+                  {i + 1}
+                  {isAnswered && !isCurrent ? " ✓" : ""}
+                </Button>
+              );
+            })}
+          </Stack>
+        </Paper>
+
+        {/* ---- Main content ---- */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {currentQ ? (
+            <Card variant="outlined">
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="subtitle1">
+                    {currentIndex + 1}. {currentQ.prompt}
+                  </Typography>
+
+                  {currentQ.type === "mcq" ? (
+                    <FormControl>
+                      <FormLabel>Choose one</FormLabel>
+                      <RadioGroup
+                        value={answers[currentQ.question_id] ?? ""}
+                        onChange={(e) =>
+                          setAnswers((prev) => ({
+                            ...prev,
+                            [currentQ.question_id]: e.target.value,
+                          }))
+                        }
+                      >
+                        {(currentQ.options ?? []).map((opt) => (
+                          <FormControlLabel
+                            key={opt}
+                            value={opt.slice(0, 1)}
+                            control={<Radio />}
+                            label={opt}
+                          />
+                        ))}
+                      </RadioGroup>
+                    </FormControl>
+                  ) : (
+                    <TextField
+                      multiline
+                      minRows={4}
+                      fullWidth
+                      label="Your answer"
+                      value={answers[currentQ.question_id] ?? ""}
+                      onChange={(e) =>
+                        setAnswers((prev) => ({
+                          ...prev,
+                          [currentQ.question_id]: e.target.value,
+                        }))
+                      }
+                    />
+                  )}
+                </Stack>
+              </CardContent>
+            </Card>
+          ) : fetchingQ ? (
+            <CircularProgress />
+          ) : error ? (
+            <Alert severity="error">{error}</Alert>
+          ) : null}
+
+          <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+            <Button
+              variant="outlined"
+              disabled={currentIndex === 0 || fetchingQ}
+              onClick={goPrev}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="contained"
+              disabled={isLastQuestion || fetchingQ}
+              onClick={goNext}
+            >
+              {fetchingQ ? "Loading\u2026" : "Next"}
+            </Button>
+          </Stack>
+        </Box>
+      </Box>
 
       {error ? <Alert severity="error">{error}</Alert> : null}
 
-      <Grid container spacing={2}>
-        <Grid>
-          <Button
-            variant="contained"
-            size="large"
-            disabled={submitting}
-            onClick={() => setConfirmOpen(true)}
-          >
-            Submit exam
-          </Button>
-        </Grid>
-      </Grid>
+      <Button
+        variant="contained"
+        size="large"
+        disabled={submitting}
+        onClick={() => setConfirmOpen(true)}
+      >
+        Submit exam
+      </Button>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <DialogTitle>Submit your answers?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            You answered {answered} of {questions.length} questions. You cannot change
-            your answers after submitting.
+            You answered {answeredCount} of {totalQuestions} questions. You
+            cannot change your answers after submitting.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Keep working</Button>
           <Button variant="contained" onClick={submit} disabled={submitting}>
-            {submitting ? "Submitting…" : "Submit"}
+            {submitting ? "Submitting\u2026" : "Submit"}
           </Button>
         </DialogActions>
       </Dialog>
