@@ -32,8 +32,9 @@ import Typography from "@mui/material/Typography";
  * that have already been fetched. A left sidebar shows all question numbers;
  * only fetched questions are clickable.
  *
- * Proctoring: leaving the tab, exiting fullscreen, and copy/paste are reported
- * to the proctoring API while the exam is open.
+ * Proctoring: leaving the tab, exiting fullscreen, copy/paste, and opening
+ * DevTools are reported to the proctoring API while the exam is open.
+ * Right-click and keyboard shortcuts that could open DevTools are blocked.
  */
 
 type Question = {
@@ -166,7 +167,7 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
 
   const report = useCallback(
     (
-      type: "tab_switch" | "copy_paste" | "fullscreen_exit",
+      type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open",
       metadata?: object
     ) => {
       const meta = examMetaRef.current;
@@ -200,6 +201,105 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       document.removeEventListener("copy", onCopyPaste);
       document.removeEventListener("paste", onCopyPaste);
       document.removeEventListener("fullscreenchange", onFullscreen);
+    };
+  }, [report]);
+
+  /* ------------------------------------------------------------------ */
+  /*   DevTools detection & input blocking                               */
+  /* ------------------------------------------------------------------ */
+
+  useEffect(() => {
+    let devtoolsReported = false;
+
+    const reportOnce = () => {
+      if (!devtoolsReported) {
+        devtoolsReported = true;
+        report("devtools_open");
+      }
+    };
+
+    // ---- 1. Block right-click context menu ----
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+
+    // ---- 2. Block keyboard shortcuts that open DevTools / view source ----
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toUpperCase();
+
+      // F12
+      if (e.key === "F12") { e.preventDefault(); return; }
+
+      // Ctrl / Cmd + Shift + I / J / C / K  (DevTools / Console / Inspector / Network)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && ["I", "J", "C", "K"].includes(key)) {
+        e.preventDefault(); return;
+      }
+
+      // Ctrl / Cmd + U  (view source)
+      if ((e.ctrlKey || e.metaKey) && key === "U") {
+        e.preventDefault(); return;
+      }
+
+      // Ctrl / Cmd + Shift + S  (save-as can be used to inspect)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === "S") {
+        e.preventDefault(); return;
+      }
+    };
+
+    // ---- 3. DevTools detection via console.dir getter trick ----
+    //    When DevTools is open, console.dir accesses element properties
+    //    to display them — triggering our getter.
+    const probe = document.createElement("div");
+    Object.defineProperty(probe, "id", {
+      get() {
+        reportOnce();
+      },
+    });
+
+    const detectConsole = () => {
+      // eslint-disable-next-line no-console
+      console.dir(probe);
+    };
+
+    // ---- 4. DevTools detection via outer/inner dimension diff ----
+    //    Docked DevTools shrink innerWidth or innerHeight while outer
+    //    dimensions stay the same.
+    const DIM_THRESHOLD = 160;
+    let lastW = window.outerWidth;
+    let lastH = window.outerHeight;
+
+    const onResize = () => {
+      const w = window.outerWidth;
+      const h = window.outerHeight;
+      const deltaW = Math.abs(w - lastW);
+      const deltaH = Math.abs(h - lastH);
+      lastW = w;
+      lastH = h;
+
+      // A large, sudden dimension change while the page is visible
+      // strongly indicates DevTools being toggled on/off.
+      if (deltaW > DIM_THRESHOLD || deltaH > DIM_THRESHOLD) {
+        reportOnce();
+      }
+    };
+
+    // ---- 5. Disable select / drag on the page to prevent copying content ----
+    const onSelectStart = (e: Event) => e.preventDefault();
+    const onDragStart = (e: Event) => e.preventDefault();
+
+    document.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    document.addEventListener("selectstart", onSelectStart);
+    document.addEventListener("dragstart", onDragStart);
+
+    const interval = setInterval(detectConsole, 1500);
+
+    return () => {
+      document.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("selectstart", onSelectStart);
+      document.removeEventListener("dragstart", onDragStart);
+      clearInterval(interval);
     };
   }, [report]);
 
