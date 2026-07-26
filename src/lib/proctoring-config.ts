@@ -8,6 +8,7 @@ export interface ProctoringConfig {
   copyPasteWeight: number;
   devtoolsWeight: number;
   multipleFacesWeight: number;
+  screenViolationWeight: number;
   duplicateEventWindowMs: number;
   absenceScoreIntervalSeconds: number;
   maxAbsenceEventWeight: number;
@@ -23,6 +24,7 @@ export const PROCTORING_CONFIG: ProctoringConfig = {
   copyPasteWeight: 20,
   devtoolsWeight: 35,
   multipleFacesWeight: 25,
+  screenViolationWeight: 40,
   duplicateEventWindowMs: 5000,
   absenceScoreIntervalSeconds: 15,
   maxAbsenceEventWeight: 60,

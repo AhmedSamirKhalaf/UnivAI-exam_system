@@ -13,6 +13,7 @@ export const proctoringEventSchema = z.object({
     "tab_switch",
     "copy_paste",
     "devtools_open",
+    "screen_violation",
   ]),
   weight: z.number().min(0),
   score_at_event: z.number().min(0),

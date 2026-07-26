@@ -6,7 +6,8 @@ export type ProctoringEventType =
   | "fullscreen_exit"
   | "tab_switch"
   | "copy_paste"
-  | "devtools_open";
+  | "devtools_open"
+  | "screen_violation";
 
 export interface IProctoringEvent extends Document {
   _id: mongoose.Types.ObjectId;
@@ -45,6 +46,7 @@ const proctoringEventSchema = new Schema<IProctoringEvent>(
         "tab_switch",
         "copy_paste",
         "devtools_open",
+        "screen_violation",
       ],
       required: true,
     },

@@ -547,6 +547,7 @@ const EVENT_WEIGHT_MAP: Record<ProctoringEventType, number> = {
   tab_switch: PROCTORING_CONFIG.tabSwitchWeight,
   copy_paste: PROCTORING_CONFIG.copyPasteWeight,
   devtools_open: PROCTORING_CONFIG.devtoolsWeight,
+  screen_violation: PROCTORING_CONFIG.screenViolationWeight,
 };
 
 export async function recordDiscreteEvent(
