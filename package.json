@@ -4,6 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3200",
+    "dev:standalone": "tsx scripts/standalone.ts dev",
+    "standalone:up": "tsx scripts/standalone.ts up",
+    "standalone:seed": "tsx scripts/standalone.ts seed",
+    "standalone:reset": "tsx scripts/standalone.ts reset",
+    "standalone:down": "tsx scripts/standalone.ts down",
+    "seed:integration": "tsx scripts/standalone.ts seed-integration",
+    "smoke:standalone": "tsx scripts/standalone.ts smoke",
+    "test": "tsx --test tests/*.test.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -30,6 +38,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }

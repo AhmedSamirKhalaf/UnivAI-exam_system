@@ -5,6 +5,7 @@ import {
   recordDiscreteEvent,
   recordCameraEvent,
 } from "@/lib/business-logic";
+import { assertStandaloneRequest } from "@/lib/runtime";
 
 const CAMERA_EVENT_TYPES = ["no_face", "multiple_faces"];
 const DISCRETE_EVENT_TYPES = [
@@ -20,6 +21,7 @@ export async function POST(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
+    assertStandaloneRequest(request);
     await connectDB();
     const { examId } = await params;
     const body = await request.json();

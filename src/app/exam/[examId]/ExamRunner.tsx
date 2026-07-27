@@ -51,9 +51,9 @@ type Exam = {
   generated_questions?: Question[];
 };
 
-type Props = { examId: string; returnUrl: string };
+type Props = { examId: string; returnUrl: string; devToken?: string };
 
-export default function ExamRunner({ examId, returnUrl }: Props) {
+export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [exam, setExam] = useState<Exam | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -62,21 +62,29 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
   const [warnings, setWarnings] = useState(0);
   const examRef = useRef<Exam | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/exams/${examId}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not load the exam.");
-      setExam(data);
-      examRef.current = data;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the exam.");
-    }
-  }, [examId]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    fetch(`/api/exams/${examId}`, {
+      cache: "no-store",
+      headers: devToken ? { "x-univai-dev-token": devToken } : undefined,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not load the exam.");
+        if (active) {
+          setExam(data);
+          examRef.current = data;
+        }
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Could not load the exam.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [examId, devToken]);
 
   /** Report a proctoring event. Never throws: proctoring must not break the exam. */
   const report = useCallback(
@@ -86,11 +94,14 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       setWarnings((count) => count + 1);
       fetch(`/api/exams/${examId}/proctoring-event`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
+        },
         body: JSON.stringify({ type, student_id: current.student_id, metadata }),
       }).catch(() => undefined);
     },
-    [examId]
+    [examId, devToken]
   );
 
   useEffect(() => {
@@ -125,7 +136,10 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       }));
       const res = await fetch(`/api/exams/${examId}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
+        },
         body: JSON.stringify({ student_answers }),
       });
       const data = await res.json();
@@ -151,7 +165,7 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
   if (!exam) return <CircularProgress />;
 
   // ---------------------------------------------------------------- submitted view
-  // No result is shown HERE: grading and the proctoring verdict live in UnivAI.
+  // No result is shown HERE: grading and the proctoring review live in UnivAI.
   // The exam hall only confirms the hand-in and sends the student back.
   if (exam.taken) {
     return (
@@ -162,8 +176,9 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
             <Stack spacing={2}>
               <Typography variant="h6">Answers submitted</Typography>
               <Alert severity="success">
-                Your answers and the proctoring report were sent to UnivAI. Your grade
-                will appear on your dashboard once it is recorded.
+                Your answers and the proctoring observations were sent to UnivAI for
+                the configured policy and review process. Your grade will appear on
+                your dashboard once it is recorded.
               </Alert>
               <Grid container spacing={2}>
                 <Grid>

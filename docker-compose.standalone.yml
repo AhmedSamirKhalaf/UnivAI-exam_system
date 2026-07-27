@@ -1,0 +1,17 @@
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: univai-exam-standalone-mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - univai-exam-standalone:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  univai-exam-standalone:

@@ -1,0 +1,24 @@
+{
+  "exam_id": "64b000000000000000000023",
+  "type": "quiz",
+  "title": "Completed quiz",
+  "student_id": "64b000000000000000000001",
+  "student_sid": "S-2026-000042",
+  "chapter_id": "64b000000000000000000012",
+  "mark": 5,
+  "total_questions": 5,
+  "passing_mark": 3,
+  "passed": true,
+  "grading_status": "auto_graded",
+  "integrity_status": "clean",
+  "policy_action": "none",
+  "review_status": "not_required",
+  "report": {
+    "suspicion_score": 0,
+    "flagged": false,
+    "session_status": "completed",
+    "started_at": "2026-07-27T09:00:00.000Z",
+    "ended_at": "2026-07-27T09:10:00.000Z",
+    "events": []
+  }
+}

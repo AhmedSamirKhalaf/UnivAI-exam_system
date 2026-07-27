@@ -19,6 +19,8 @@ export type {
   ExamType,
   GradingStatus,
   IntegrityStatus,
+  PolicyAction,
+  ReviewStatus,
 } from "./Exam";
 
 export { ExamChapter } from "./ExamChapter";

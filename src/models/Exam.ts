@@ -3,6 +3,8 @@ import mongoose, { Schema, Model, Document } from "mongoose";
 export type ExamType = "quiz" | "mid" | "final";
 export type GradingStatus = "auto_graded" | "pending_review" | "graded";
 export type IntegrityStatus = "clean" | "invalidated";
+export type PolicyAction = "none" | "session_invalidated";
+export type ReviewStatus = "not_required" | "pending" | "cleared" | "upheld";
 
 export interface IExam extends Document {
   _id: mongoose.Types.ObjectId;
@@ -23,6 +25,8 @@ export interface IExam extends Document {
   passed: boolean;
   grading_status: GradingStatus;
   integrity_status: IntegrityStatus;
+  policy_action: PolicyAction;
+  review_status: ReviewStatus;
   invalidated_at?: Date;
   invalidation_notified_at?: Date;
   createdAt: Date;
@@ -69,6 +73,18 @@ const examSchema = new Schema<IExam>(
       enum: ["clean", "invalidated"],
       required: true,
       default: "clean",
+    },
+    policy_action: {
+      type: String,
+      enum: ["none", "session_invalidated"],
+      required: true,
+      default: "none",
+    },
+    review_status: {
+      type: String,
+      enum: ["not_required", "pending", "cleared", "upheld"],
+      required: true,
+      default: "not_required",
     },
     invalidated_at: { type: Date },
     invalidation_notified_at: { type: Date },

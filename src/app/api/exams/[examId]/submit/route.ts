@@ -2,12 +2,14 @@ import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { submitExam, examToPlain } from "@/lib/business-logic";
 import { sendResultWebhook } from "@/lib/report-webhook";
+import { assertStandaloneRequest } from "@/lib/runtime";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
+    assertStandaloneRequest(request);
     await connectDB();
     const { examId } = await params;
     const body = await request.json();
