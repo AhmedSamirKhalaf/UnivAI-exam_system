@@ -4,6 +4,11 @@ import test from "node:test";
 
 import { resultWebhookSchema } from "../src/lib/contracts";
 import { createSeededRandom, shuffled } from "../src/lib/deterministic-rng";
+import {
+  DEVTOOLS_DIMENSION_THRESHOLD,
+  getDevToolsDimensionSignal,
+  getRestrictedShortcut,
+} from "../src/lib/proctoring-signals";
 
 test("seeded random produces stable question order", () => {
   const first = shuffled([1, 2, 3, 4, 5], createSeededRandom(20260727));
@@ -48,4 +53,40 @@ test("invalid proctoring event is rejected", () => {
     },
   };
   assert.equal(resultWebhookSchema.safeParse(fixture).success, false);
+});
+
+test("developer-tools dimension signal ignores normal browser chrome", () => {
+  assert.equal(
+    getDevToolsDimensionSignal({
+      outerWidth: 1440,
+      innerWidth: 1420,
+      outerHeight: 900,
+      innerHeight: 800,
+    }),
+    null
+  );
+
+  assert.deepEqual(
+    getDevToolsDimensionSignal({
+      outerWidth: 1440,
+      innerWidth: 1440 - DEVTOOLS_DIMENSION_THRESHOLD,
+      outerHeight: 900,
+      innerHeight: 800,
+    }),
+    { widthDiff: DEVTOOLS_DIMENSION_THRESHOLD, heightDiff: 100 }
+  );
+});
+
+test("restricted developer-tools shortcuts are cross-platform and specific", () => {
+  const base = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(getRestrictedShortcut({ ...base, key: "F12" }), "F12");
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "i", ctrlKey: true, shiftKey: true }),
+    "Ctrl+Shift+I"
+  );
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "j", metaKey: true, altKey: true }),
+    "Meta+Alt+J"
+  );
+  assert.equal(getRestrictedShortcut({ ...base, key: "i", ctrlKey: true }), null);
 });
