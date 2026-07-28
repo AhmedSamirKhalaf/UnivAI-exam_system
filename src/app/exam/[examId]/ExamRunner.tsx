@@ -88,7 +88,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
 
   /** Report a proctoring event. Never throws: proctoring must not break the exam. */
   const report = useCallback(
-    (type: "tab_switch" | "copy_paste" | "fullscreen_exit", metadata?: object) => {
+    (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
       const current = examRef.current;
       if (!current || current.taken) return;
       setWarnings((count) => count + 1);
@@ -112,16 +112,61 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     const onFullscreen = () => {
       if (!document.fullscreenElement) report("fullscreen_exit");
     };
+    const onBlur = () => {
+      if (!document.hidden) report("tab_switch", { via: "window_blur" });
+    };
 
     document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("copy", onCopyPaste);
     document.addEventListener("paste", onCopyPaste);
     document.addEventListener("fullscreenchange", onFullscreen);
+    window.addEventListener("blur", onBlur);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("copy", onCopyPaste);
       document.removeEventListener("paste", onCopyPaste);
       document.removeEventListener("fullscreenchange", onFullscreen);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [report]);
+
+  /** Detect DevTools being opened via keyboard shortcuts, dimension changes, or debugger timing. */
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    function detectDevTools() {
+      const widthDiff = window.outerWidth - window.innerWidth;
+      const heightDiff = window.outerHeight - window.innerHeight;
+      if (widthDiff > 200 || heightDiff > 200) {
+        report("devtools_open", { method: "dimension", widthDiff, heightDiff });
+      }
+
+      const start = performance.now();
+      debugger;
+      if (performance.now() - start > 100) {
+        report("devtools_open", { method: "debugger" });
+      }
+
+      timeoutId = setTimeout(detectDevTools, 3000);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (
+        event.key === "F12" ||
+        (event.ctrlKey && event.shiftKey && (event.key === "I" || event.key === "J" || event.key === "C")) ||
+        (event.ctrlKey && event.key === "U")
+      ) {
+        event.preventDefault();
+        report("devtools_open", { method: "keyboard_shortcut", key: event.key });
+      }
+    }
+
+    timeoutId = setTimeout(detectDevTools, 3000);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [report]);
 
