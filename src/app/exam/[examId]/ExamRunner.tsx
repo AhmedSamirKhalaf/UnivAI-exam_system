@@ -22,6 +22,10 @@ import RadioGroup from "@mui/material/RadioGroup";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import {
+  getDevToolsDimensionSignal,
+  getRestrictedShortcut,
+} from "@/lib/proctoring-signals";
 
 /**
  * The exam-taking screen. Pure MUI: no CSS files, no sx, no styled().
@@ -61,6 +65,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
   const examRef = useRef<Exam | null>(null);
+  const lastReportAtRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let active = true;
@@ -91,7 +96,11 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
       const current = examRef.current;
       if (!current || current.taken) return;
-      setWarnings((count) => count + 1);
+
+      const now = Date.now();
+      if (now - (lastReportAtRef.current[type] ?? 0) < 1000) return;
+      lastReportAtRef.current[type] = now;
+
       fetch(`/api/exams/${examId}/proctoring-event`, {
         method: "POST",
         headers: {
@@ -99,7 +108,11 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
           ...(devToken ? { "x-univai-dev-token": devToken } : {}),
         },
         body: JSON.stringify({ type, student_id: current.student_id, metadata }),
-      }).catch(() => undefined);
+      })
+        .then((response) => {
+          if (response.ok) setWarnings((count) => count + 1);
+        })
+        .catch(() => undefined);
     },
     [examId, devToken]
   );
@@ -130,42 +143,45 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     };
   }, [report]);
 
-  /** Detect DevTools being opened via keyboard shortcuts, dimension changes, or debugger timing. */
+  /**
+   * Record developer-tool signals without claiming certainty. Browser JavaScript
+   * cannot reliably prove that DevTools is open, so the dimension heuristic
+   * requires two consecutive samples and reports at most once per exam.
+   */
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let consecutiveDimensionSignals = 0;
+    let dimensionSignalReported = false;
 
-    function detectDevTools() {
-      const widthDiff = window.outerWidth - window.innerWidth;
-      const heightDiff = window.outerHeight - window.innerHeight;
-      if (widthDiff > 200 || heightDiff > 200) {
-        report("devtools_open", { method: "dimension", widthDiff, heightDiff });
+    function sampleDimensions() {
+      const signal = getDevToolsDimensionSignal(window);
+      consecutiveDimensionSignals = signal ? consecutiveDimensionSignals + 1 : 0;
+      if (signal && consecutiveDimensionSignals >= 2 && !dimensionSignalReported) {
+        dimensionSignalReported = true;
+        report("devtools_open", {
+          method: "dimension_heuristic",
+          confidence: "low",
+          ...signal,
+        });
       }
-
-      const start = performance.now();
-      debugger;
-      if (performance.now() - start > 100) {
-        report("devtools_open", { method: "debugger" });
-      }
-
-      timeoutId = setTimeout(detectDevTools, 3000);
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (
-        event.key === "F12" ||
-        (event.ctrlKey && event.shiftKey && (event.key === "I" || event.key === "J" || event.key === "C")) ||
-        (event.ctrlKey && event.key === "U")
-      ) {
-        event.preventDefault();
-        report("devtools_open", { method: "keyboard_shortcut", key: event.key });
-      }
+      const shortcut = getRestrictedShortcut(event);
+      if (!shortcut) return;
+
+      event.preventDefault();
+      report("devtools_open", {
+        method: "restricted_shortcut",
+        confidence: "medium",
+        shortcut,
+      });
     }
 
-    timeoutId = setTimeout(detectDevTools, 3000);
+    const intervalId = window.setInterval(sampleDimensions, 3000);
     document.addEventListener("keydown", onKeyDown);
 
     return () => {
-      clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [report]);
@@ -253,8 +269,9 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       <Typography variant="h4">{exam.title}</Typography>
 
       <Alert severity="warning">
-        You are being proctored: leaving this tab, copy/paste, and exiting fullscreen
-        are recorded{warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
+        You are being proctored: leaving this tab, copy/paste, exiting fullscreen,
+        and developer-tool signals are recorded
+        {warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
       </Alert>
 
       <LinearProgress variant="determinate" value={(answered / Math.max(1, questions.length)) * 100} />
