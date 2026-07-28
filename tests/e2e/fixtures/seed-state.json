@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "schema_source": "Model_Context/schema-design.md (Steps 1-14, final schemas section)",
+  "fixture_description": "Canonical seed state for Sprint 1 E2E black-box acceptance harness. Matches the standalone seed identifiers documented in README.md.",
+  "seeds": {
+    "student": {
+      "_id": "64b000000000000000000001",
+      "sid": "S-2026-000042",
+      "name": "Alice Seeded"
+    },
+    "curriculum": {
+      "_id": "64b000000000000000000010",
+      "title": "Introduction to Computer Science",
+      "description": "Foundational CS curriculum covering algorithms, data structures, and programming concepts."
+    },
+    "chapters": [
+      { "_id": "64b000000000000000000011", "curriculum_id": "64b000000000000000000010", "title": "Algorithms & Complexity", "number": 1 },
+      { "_id": "64b000000000000000000012", "curriculum_id": "64b000000000000000000010", "title": "Data Structures", "number": 2 },
+      { "_id": "64b000000000000000000013", "curriculum_id": "64b000000000000000000010", "title": "Programming Paradigms", "number": 3 },
+      { "_id": "64b000000000000000000014", "curriculum_id": "64b000000000000000000010", "title": "Computer Architecture", "number": 4 }
+    ],
+    "enrollment": {
+      "_id": "64b000000000000000000015",
+      "student_id": "64b000000000000000000001",
+      "curriculum_id": "64b000000000000000000010",
+      "status": "active"
+    },
+    "scenario_exams": {
+      "quiz_not_started":    { "_id": "64b000000000000000000021", "chapter_id": "64b000000000000000000011" },
+      "quiz_active":         { "_id": "64b000000000000000000022", "chapter_id": "64b000000000000000000012" },
+      "quiz_submitted":      { "_id": "64b000000000000000000023", "chapter_id": "64b000000000000000000013" },
+      "final_pending_review":{ "_id": "64b000000000000000000024" },
+      "final_flagged":       { "_id": "64b000000000000000000025" }
+    }
+  },
+  "base_urls": {
+    "api": "http://localhost:3200",
+    "app": "http://localhost:3200"
+  }
+}

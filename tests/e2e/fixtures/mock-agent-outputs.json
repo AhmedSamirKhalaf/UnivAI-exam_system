@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "schema_source": "Core Agent output contract (Day 1 fixture). Recorded for black-box evaluation harness.",
+  "cases": [
+    {
+      "case_id": "agent-grounded-001",
+      "question": "What is the time complexity of binary search on a sorted array?",
+      "sources": [
+        { "source_id": "ch1-algorithms", "location": "Chapter 1, page 42", "relevance": 0.95 }
+      ],
+      "answer": "O(log n)",
+      "refused": false
+    },
+    {
+      "case_id": "agent-grounded-002",
+      "question": "Explain the difference between a stack and a queue.",
+      "sources": [
+        { "source_id": "ch2-ds", "location": "Chapter 2, page 78", "relevance": 0.92 }
+      ],
+      "answer": "A stack uses LIFO (Last In, First Out) while a queue uses FIFO (First In, First Out).",
+      "refused": false
+    },
+    {
+      "case_id": "agent-refusal-001",
+      "question": "What is the capital of France?",
+      "sources": [],
+      "answer": null,
+      "refused": true
+    }
+  ]
+}

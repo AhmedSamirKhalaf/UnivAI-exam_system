@@ -25,7 +25,7 @@ const integrationSeed = command === "seed-integration";
 process.env.MONGODB_URI ??=
   integrationSeed
     ? "mongodb://127.0.0.1:27017/univai_exams"
-    : "mongodb://127.0.0.1:27018/univai_exams_standalone";
+    : "mongodb://127.0.0.1:27017/univai_exams_standalone";
 
 const IDS = {
   student: STANDALONE_STUDENT_ID,
@@ -296,6 +296,15 @@ async function reset(): Promise<void> {
 }
 
 function docker(action: "up" | "down"): void {
+  // Check whether Docker is available at all before attempting compose.
+  const dockerCheck = spawnSync("docker", ["info"], { stdio: "pipe", shell: false });
+  if (dockerCheck.status !== 0) {
+    console.warn(
+      `[standalone] Docker not available (${dockerCheck.stderr?.toString().trim() ?? "unknown error"}).\n` +
+      `[standalone] Skipping 'docker compose ${action}' — make sure your local MongoDB is already running on the configured URI.`
+    );
+    return;
+  }
   const args = action === "up" ? [...compose, "up", "-d", "--wait"] : [...compose, "down"];
   const result = spawnSync("docker", args, { stdio: "inherit", shell: false });
   if (result.status !== 0) throw new Error(`docker compose ${action} failed`);
