@@ -44,3 +44,9 @@ export type {
   IProctoringEvent,
   ProctoringEventType,
 } from "./ProctoringEvent";
+
+export { AssessmentBlueprint } from "./AssessmentBlueprint";
+export type { IAssessmentBlueprint, ISourceCoverage } from "./AssessmentBlueprint";
+
+export { QuestionProvenance } from "./QuestionProvenance";
+export type { IQuestionProvenance, IProvenanceSource } from "./QuestionProvenance";
