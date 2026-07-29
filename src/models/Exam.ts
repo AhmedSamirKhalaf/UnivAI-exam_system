@@ -16,6 +16,11 @@ export interface IExam extends Document {
   student_sid?: string;
   curriculum_id?: mongoose.Types.ObjectId;
   chapter_id?: mongoose.Types.ObjectId;
+  blueprint_id?: mongoose.Types.ObjectId;
+  plan_version?: string;
+  submitted_at?: Date;
+  submission_idempotency_key?: string;
+  integrity_metadata?: Record<string, unknown>;
   attempt_number: number;
   generated_questions?: Record<string, unknown>[];
   student_answers?: Record<string, unknown>[];
@@ -55,6 +60,14 @@ const examSchema = new Schema<IExam>(
       type: Schema.Types.ObjectId,
       ref: "Chapter",
     },
+    blueprint_id: {
+      type: Schema.Types.ObjectId,
+      ref: "AssessmentBlueprint",
+    },
+    plan_version: { type: String },
+    submitted_at: { type: Date },
+    submission_idempotency_key: { type: String },
+    integrity_metadata: { type: Schema.Types.Mixed },
     attempt_number: { type: Number, required: true, default: 1 },
     generated_questions: { type: Schema.Types.Mixed },
     student_answers: { type: Schema.Types.Mixed },
