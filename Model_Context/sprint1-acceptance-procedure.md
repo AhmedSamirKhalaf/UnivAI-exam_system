@@ -5,12 +5,15 @@
 This repository provides two separate gates:
 
 1. a 56-case source-grounding dataset and scorer for recorded Agent outputs;
-2. a seven-gate black-box journey across the real Exam HTTP boundary.
+2. an eight-gate black-box journey across the real Exam HTTP boundary.
 
 The Exam journey covers ingestion, quiz opening, answer submission, proctoring,
-final-exam gating, and trusted-result capture. The complete multi-repository path
-(`App → Core/Agent → Live → Exam → App`) is a separate configured manual gate and
-must remain `NOT RUN` when those services and their URLs are unavailable.
+final-exam gating, trusted-result capture, and an approved upstream
+multi-book/programme/lecture-Q&A fixture crossing into the real Exam API. The
+fixture is labelled `recorded_fixture`; it never counts as a production
+App/Core/Agent/Live pass. The complete multi-repository path
+(`App → Core/Agent → Live → Exam → App`) is a separate configured manual gate
+and must remain `NOT RUN` when those services and their URLs are unavailable.
 
 ## Prerequisites
 
@@ -67,9 +70,16 @@ In a second terminal:
 npx playwright test tests/e2e/final-mvp-sprint1.spec.ts
 ```
 
-Expected: seven passed gates. A missing server, invalid token, unavailable
+Expected: eight passed gates. A missing server, invalid token, unavailable
 database, unexpected denial, or absent webhook capture fails the command. Tests
 do not return early or convert an unavailable dependency into a pass.
+
+Gate 8 validates the versioned recorded upstream fixture (multiple ready source
+documents, approved programme, grounded lecture answer, and source
+relationships), then uses that handoff to open and submit a quiz through the
+real Exam HTTP API and verifies the captured trusted result. It is the CI path
+allowed by the issue's contract-first unblocking rule; it does not replace the
+configured production-services manual gate.
 
 ## 5. Run repository gates
 
@@ -99,7 +109,7 @@ Update `evidence/final-mvp/sprint1/README.md` with:
 - any unsupported-answer, prompt-injection, malformed-output, or invalid
   provenance case fails;
 - missing/wrong citations in the citation category;
-- any of the seven Exam black-box gates fails;
+- any of the eight Exam black-box gates fails;
 - a dependency is reported as passed when it was not executed.
 
 Mock fixture success validates the scorer path only. It is not evidence that the
