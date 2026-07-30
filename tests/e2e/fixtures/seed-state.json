@@ -40,5 +40,79 @@
   "base_urls": {
     "api": "http://localhost:3200",
     "app": "http://localhost:3200"
+  },
+  "upstream_fixture": {
+    "schema_version": "programme-plan-v1",
+    "provider_mode": "recorded_fixture",
+    "source_collection": {
+      "id": "collection-sprint1-001",
+      "student_sid": "S-2026-000042",
+      "documents": [
+        {
+          "id": "doc-algorithms",
+          "filename": "algorithms.pdf",
+          "status": "ready",
+          "source_ids": ["ch1-algorithms", "ch1-complexity"]
+        },
+        {
+          "id": "doc-data-structures",
+          "filename": "data-structures.pdf",
+          "status": "ready",
+          "source_ids": ["ch2-ds", "ch2-data-structures"]
+        },
+        {
+          "id": "doc-programming",
+          "filename": "programming-paradigms.pdf",
+          "status": "ready",
+          "source_ids": ["ch3-programming", "ch3-paradigms"]
+        }
+      ]
+    },
+    "programme": {
+      "id": "programme-sprint1-001",
+      "collection_id": "collection-sprint1-001",
+      "status": "approved",
+      "plan_version": 1,
+      "approved_at": "2026-07-30T00:00:00.000Z",
+      "courses": [
+        {
+          "id": "course-algorithms",
+          "title": "Algorithms and Complexity",
+          "source_document_ids": ["doc-algorithms"]
+        },
+        {
+          "id": "course-data-structures",
+          "title": "Data Structures",
+          "source_document_ids": ["doc-data-structures"]
+        },
+        {
+          "id": "course-programming",
+          "title": "Programming Paradigms",
+          "source_document_ids": ["doc-programming"]
+        }
+      ]
+    },
+    "lecture_qa": {
+      "lecture_id": "lecture-sprint1-001",
+      "course_id": "course-algorithms",
+      "state": "completed",
+      "question": "What is the time complexity of binary search on a sorted array?",
+      "response": {
+        "answer": "Binary search has O(log n) time complexity because each comparison halves the remaining sorted search space.",
+        "refused": false,
+        "sources": [
+          {
+            "document_id": "doc-algorithms",
+            "source_id": "ch1-algorithms",
+            "location": "Chapter 1"
+          }
+        ]
+      }
+    },
+    "exam_handoff": {
+      "student_id": "64b000000000000000000001",
+      "student_sid": "S-2026-000042",
+      "chapter_id": "64b000000000000000000011"
+    }
   }
 }

@@ -4,9 +4,11 @@
 
 `PARTIAL`
 
-The dataset, evaluator fixture path, and Exam HTTP boundary passed. A real
-56-case Agent run and the complete App/Core/Agent/Live journey were not executed,
-so this file does not claim full cross-system acceptance.
+The dataset, evaluator fixture path, and Exam HTTP boundary passed. The
+versioned upstream fixture also crossed into a real Exam start, submission, and
+trusted-result capture. A real 56-case Agent run and the complete production
+App/Core/Agent/Live journey were not executed, so this file does not claim full
+cross-system acceptance.
 
 ## Dataset
 
@@ -63,7 +65,7 @@ serving port 3200:
 
 ```text
 BASE_URL=http://127.0.0.1:3214 npx playwright test tests/e2e/final-mvp-sprint1.spec.ts
-7 passed
+8 passed
 Result: PASS
 ```
 
@@ -76,6 +78,13 @@ Covered gates:
 5. proctoring observation is accepted for an active session;
 6. final remains locked before all quizzes pass;
 7. submission produces a trusted-result webhook capture.
+8. a versioned recorded multi-book/programme/lecture-Q&A fixture validates its
+   source relationships, crosses the real Exam API boundary, submits a quiz,
+   and matches the trusted-result capture by exam ID.
+
+Gate 8 uses `provider_mode: recorded_fixture` for App/Core/Agent/Live because
+the issue explicitly allows fixture providers in CI. Its Exam start, fetch,
+submission, and webhook capture are real HTTP calls and are not mocked.
 
 ### Repository checks
 
@@ -96,7 +105,8 @@ PASS
 ## NOT RUN
 
 - Real Agent responses for all 56 dataset cases.
-- Complete `App → Core/Agent → Live → Exam → App` journey.
+- Complete production `App → Core/Agent → Live → Exam → App` journey. Gate 8
+  covers the recorded-fixture-to-real-Exam CI path only.
 - Manual citation verification against the original book pages.
 
 These need configured service URLs, approved source documents, and recorded
@@ -112,6 +122,9 @@ Agent outputs. They are not converted into mock passes.
   corrected; every unavailable or unexpected response now fails.
 - Fixture curriculum IDs did not match the canonical seed:
   corrected.
+- The original E2E stopped at Exam-owned setup and did not implement the
+  required multi-book/programme/lecture-Q&A handoff: corrected with the
+  versioned recorded upstream fixture and a real Exam-boundary journey.
 - No production API/model/schema defect was found by the seven executed gates.
 
 ## Ownership check
