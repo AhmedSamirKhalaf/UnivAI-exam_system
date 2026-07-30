@@ -1,4 +1,4 @@
-import mongoose, { Schema, Model, Document } from "mongoose";
+import mongoose, { Document, Model, Schema } from "mongoose";
 
 export interface IProvenanceSource {
   document_id: string;
@@ -10,6 +10,8 @@ export interface IProvenanceSource {
 
 export interface IQuestionProvenance extends Document {
   _id: mongoose.Types.ObjectId;
+  blueprint_id: mongoose.Types.ObjectId;
+  schema_version: "question-provenance-v1";
   question_id: string;
   prompt: string;
   type: "mcq" | "essay";
@@ -24,27 +26,57 @@ export interface IQuestionProvenance extends Document {
 
 const questionProvenanceSchema = new Schema<IQuestionProvenance>(
   {
-    question_id: { type: String, required: true, unique: true },
-    prompt: { type: String, required: true },
-    type: { type: String, enum: ["mcq", "essay"], required: true },
-    options: [{ type: String }],
-    correct_option: { type: String },
-    plan_version: { type: String, required: true },
-    approved: { type: Boolean, required: true, default: true },
+    blueprint_id: {
+      type: Schema.Types.ObjectId,
+      ref: "AssessmentBlueprint",
+      required: true,
+      immutable: true,
+    },
+    schema_version: {
+      type: String,
+      enum: ["question-provenance-v1"],
+      required: true,
+      immutable: true,
+    },
+    question_id: { type: String, required: true, immutable: true },
+    prompt: { type: String, required: true, immutable: true },
+    type: {
+      type: String,
+      enum: ["mcq", "essay"],
+      required: true,
+      immutable: true,
+    },
+    options: [{ type: String, immutable: true }],
+    correct_option: { type: String, immutable: true },
+    plan_version: { type: String, required: true, immutable: true },
+    approved: {
+      type: Boolean,
+      required: true,
+      immutable: true,
+      validate: {
+        validator: (value: boolean) => value === true,
+        message: "Published question provenance must be approved",
+      },
+    },
     provenance: {
-      document_id: { type: String, required: true },
-      document_title: { type: String, required: true },
-      page_number: { type: Number, required: true },
-      section: { type: String, required: true },
-      excerpt: { type: String },
+      document_id: { type: String, required: true, immutable: true },
+      document_title: { type: String, required: true, immutable: true },
+      page_number: { type: Number, required: true, min: 1, immutable: true },
+      section: { type: String, required: true, immutable: true },
+      excerpt: { type: String, immutable: true },
     },
   },
-  { timestamps: true, versionKey: false }
+  { timestamps: true, versionKey: false },
+);
+
+questionProvenanceSchema.index(
+  { blueprint_id: 1, question_id: 1 },
+  { unique: true },
 );
 
 export const QuestionProvenance: Model<IQuestionProvenance> =
   mongoose.models.QuestionProvenance ||
   mongoose.model<IQuestionProvenance>(
     "QuestionProvenance",
-    questionProvenanceSchema
+    questionProvenanceSchema,
   );
