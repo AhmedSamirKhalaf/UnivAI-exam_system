@@ -8,21 +8,25 @@
       "sid": "S-2026-000042",
       "name": "Alice Seeded"
     },
+    "gate_student": {
+      "_id": "64b000000000000000000009",
+      "name": "Final Gate Learner"
+    },
     "curriculum": {
-      "_id": "64b000000000000000000010",
+      "_id": "64b000000000000000000003",
       "title": "Introduction to Computer Science",
       "description": "Foundational CS curriculum covering algorithms, data structures, and programming concepts."
     },
     "chapters": [
-      { "_id": "64b000000000000000000011", "curriculum_id": "64b000000000000000000010", "title": "Algorithms & Complexity", "number": 1 },
-      { "_id": "64b000000000000000000012", "curriculum_id": "64b000000000000000000010", "title": "Data Structures", "number": 2 },
-      { "_id": "64b000000000000000000013", "curriculum_id": "64b000000000000000000010", "title": "Programming Paradigms", "number": 3 },
-      { "_id": "64b000000000000000000014", "curriculum_id": "64b000000000000000000010", "title": "Computer Architecture", "number": 4 }
+      { "_id": "64b000000000000000000011", "curriculum_id": "64b000000000000000000003", "title": "Algorithms & Complexity", "number": 1 },
+      { "_id": "64b000000000000000000012", "curriculum_id": "64b000000000000000000003", "title": "Data Structures", "number": 2 },
+      { "_id": "64b000000000000000000013", "curriculum_id": "64b000000000000000000003", "title": "Programming Paradigms", "number": 3 },
+      { "_id": "64b000000000000000000014", "curriculum_id": "64b000000000000000000003", "title": "Computer Architecture", "number": 4 }
     ],
     "enrollment": {
       "_id": "64b000000000000000000015",
       "student_id": "64b000000000000000000001",
-      "curriculum_id": "64b000000000000000000010",
+      "curriculum_id": "64b000000000000000000003",
       "status": "active"
     },
     "scenario_exams": {
