@@ -26,7 +26,7 @@
     "@mui/material-nextjs": "^9.1.1",
     "face-api.js": "^0.22.2",
     "mongoose": "^9.7.4",
-    "next": "16.2.10",
+    "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "zod": "^4.4.3"
@@ -38,8 +38,13 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.2.12",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "node-fetch": "2.7.0",
+    "postcss": "8.5.24",
+    "sharp": "0.35.3"
   }
 }
