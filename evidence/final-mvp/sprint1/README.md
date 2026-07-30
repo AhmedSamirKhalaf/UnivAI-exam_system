@@ -1,114 +1,124 @@
 # Sprint 1 — Evaluation Evidence
 
+## Status
+
+`PARTIAL`
+
+The dataset, evaluator fixture path, and Exam HTTP boundary passed. A real
+56-case Agent run and the complete App/Core/Agent/Live journey were not executed,
+so this file does not claim full cross-system acceptance.
+
 ## Dataset
 
-- **File:** `tests/capstone/grounded-v1.jsonl`
-- **Version:** v1.0 — initial Sprint 1 release
-- **Case count:** 56
-- **Categories covered:** 10
-- **Commit SHA:** `<!-- to be filled on PR -->`
-- **File hash (SHA-256):** `<!-- to be filled -->`
+- File: `tests/capstone/grounded-v1.jsonl`
+- Introduced by contributor commit: `541a59b513ea611e6328ef358ed3042db600f7d6`
+- SHA-256: `7E88FC68D3B3EFEC611AFB7F61CFC57A5B2EBD46C777A646A3689F2A92E160EF`
+- Cases: 56
+- Categories: 10
 
-## Categories
+| Category | Cases |
+|---|---:|
+| answerable_source_grounded | 22 |
+| absent_from_books_must_refuse | 8 |
+| wrong_missing_citation | 5 |
+| duplicate_conflicting_sources | 3 |
+| overlap_prerequisite | 3 |
+| malformed_structured_output | 3 |
+| direct_prompt_injection | 3 |
+| indirect_prompt_injection | 3 |
+| arabic_sample | 3 |
+| question_provenance_trusted_grading | 3 |
 
-| # | Category | Count |
-|---|---|---|
-| 1 | answerable_source_grounded | 20 |
-| 2 | absent_from_books_must_refuse | 8 |
-| 3 | wrong_missing_citation | 5 |
-| 4 | duplicate_conflicting_sources | 3 |
-| 5 | overlap_prerequisite | 3 |
-| 6 | malformed_structured_output | 3 |
-| 7 | direct_prompt_injection | 3 |
-| 8 | indirect_prompt_injection | 3 |
-| 9 | arabic_sample | 3 |
-| 10 | question_provenance_trusted_grading | 3 |
+## Commands reproduced during review
 
-## Validation Results
+### Dataset validation
 
-Command:
-```
+```text
 node tests/capstone/validate-dataset.mjs
+Valid: 56
+Invalid: 0
+Categories covered: 10
+Result: PASS
 ```
 
-Output:
-```
-Dataset: tests/capstone/grounded-v1.jsonl
-Total lines (non-empty): 56
+### Recorded mock fixture evaluation
 
-Results:
-  Valid:   56
-  Invalid: 0
-
-Categories covered (10):
-  ✓ absent_from_books_must_refuse
-  ✓ answerable_source_grounded
-  ✓ arabic_sample
-  ✓ direct_prompt_injection
-  ✓ duplicate_conflicting_sources
-  ✓ indirect_prompt_injection
-  ✓ malformed_structured_output
-  ✓ overlap_prerequisite
-  ✓ question_provenance_trusted_grading
-  ✓ wrong_missing_citation
-
-✅ All 56 cases pass schema validation.
-```
-
-Result: `PASS` — all 56 cases valid.
-
-## Mock Evaluation Results
-
-Command:
-```
+```text
 node tests/capstone/run-evaluation.mjs --mode mock
+TOTAL: 56
+PASS: 3
+FAIL: 0
+NOT RUN: 53
+Result: PASS for the three recorded fixture outputs
 ```
 
-Output (summary):
-```
-============================================================
-  TOTAL:   56
-  PASS:    56
-  FAIL:    0
-  NOT RUN: 0
-============================================================
-```
+The original runner generated every answer from the case's expected answer,
+which guaranteed 56/56. The reviewed runner now consumes recorded outputs and
+marks missing outputs `NOT RUN`.
 
-Result: `PASS` — all 56 cases pass mock evaluation.
+### Exam-facing Playwright journey
 
-Report: `tests/capstone/evaluation-report-mock.json`
+The reviewer used port 3214 because the user's existing checkout was already
+serving port 3200:
 
-## E2E Test Results
-
-Command:
-```
-npx playwright test tests/e2e/final-mvp-sprint1.spec.ts
+```text
+BASE_URL=http://127.0.0.1:3214 npx playwright test tests/e2e/final-mvp-sprint1.spec.ts
+7 passed
+Result: PASS
 ```
 
-Requires `@playwright/test` dev dependency + Chromium browser.
-Install: `npm install --save-dev @playwright/test && npx playwright install chromium`
+Covered gates:
 
-Result: `NOT RUN` — Playwright not available in this environment.
+1. standalone health and seed readiness;
+2. book ingestion reaches ready;
+3. quiz opens without answer leakage;
+4. submission is accepted and graded;
+5. proctoring observation is accepted for an active session;
+6. final remains locked before all quizzes pass;
+7. submission produces a trusted-result webhook capture.
 
-## Defects Opened
+### Repository checks
 
-| Repository | Issue URL | Description |
-|---|---|---|
-| <!-- repo --> | <!-- url --> | <!-- reproduction --> |
-| None | — | No defects found during this evaluation cycle |
+```text
+npm test
+5 passed
 
-## Acceptance Gate Status
+npm run lint
+PASS
 
-- [x] Dataset ≥ 50 cases (56)
-- [x] Schema validation passes
-- [x] Mock evaluation report generated
-- [x] E2E spec written (NOT RUN — requires `@playwright/test` install)
-- [x] No forbidden paths modified
-- [ ] All discovered defects linked
+npm run build
+PASS
 
-## Notes
+git diff --check
+PASS
+```
 
-- This evidence directory is part of the Sprint 1 acceptance gate.
-- Results distinguish PASS, FAIL, and NOT RUN separately.
-- Credentials or unavailable services never become a fake pass.
-- For full acceptance procedure, see `Model_Context/sprint1-acceptance-procedure.md`.
+## NOT RUN
+
+- Real Agent responses for all 56 dataset cases.
+- Complete `App → Core/Agent → Live → Exam → App` journey.
+- Manual citation verification against the original book pages.
+
+These need configured service URLs, approved source documents, and recorded
+Agent outputs. They are not converted into mock passes.
+
+## Defects and corrections
+
+- PR harness used Mongo port 27017 instead of isolated standalone port 27018:
+  corrected in review.
+- Invalid placeholder development token caused protected calls to fail:
+  corrected by deriving the standalone token.
+- Two E2E gates could return early and appear passed:
+  corrected; every unavailable or unexpected response now fails.
+- Fixture curriculum IDs did not match the canonical seed:
+  corrected.
+- No production API/model/schema defect was found by the seven executed gates.
+
+## Ownership check
+
+- No `src/app/api/**`, `src/lib/**`, `src/models/**`, or `src/schemas/**` file
+  was changed by PR #14.
+- `@playwright/test` remains a dev dependency because the issue mandates
+  `npm ci` followed by Playwright execution. This is the only package-manifest
+  exception to the issue's test/documentation write set.
+- No secrets are committed.

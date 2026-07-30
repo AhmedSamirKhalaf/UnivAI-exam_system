@@ -1,199 +1,190 @@
-/**
- * final-mvp-sprint1.spec.ts — Black-box E2E acceptance test for Sprint 1
- *
- * Tests the complete user path from the Exam-facing side:
- *   multi-book upload → programme approval → lecture/Q&A → open exam → submit → trusted result
- *
- * Uses configured service URLs and the exam API. Mocks only paid/external
- * model and media providers where CI requires it.
- *
- * Run: npx playwright test tests/e2e/final-mvp-sprint1.spec.ts
- */
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { expect, test } from "@playwright/test";
 
-import { test, expect } from "@playwright/test";
-import { readFileSync } from "fs";
-import { resolve } from "path";
-
-const BASE_URL = process.env.BASE_URL || "http://localhost:3200";
-const DEV_TOKEN = process.env.DEV_TOKEN || "dev-placeholder-token";
+const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3200";
+const DEFAULT_STANDALONE_SECRET = "univai-exam-local-development-only";
 
 interface SeedState {
   student: { _id: string; name: string };
+  gate_student: { _id: string; name: string };
   curriculum: { _id: string };
   chapters: Array<{ _id: string; title: string; number: number }>;
-  enrollment: { _id: string };
   scenario_exams: Record<string, { _id: string; chapter_id?: string }>;
 }
 
-function loadFixture<T>(name: string): T {
-  const path = resolve(__dirname, "fixtures", name);
-  return JSON.parse(readFileSync(path, "utf-8")) as T;
+type Question = {
+  question_id: string;
+  type: "mcq" | "essay";
+  correct_option?: string;
+};
+
+function loadSeed(): SeedState {
+  const path = resolve(__dirname, "fixtures", "seed-state.json");
+  return (JSON.parse(readFileSync(path, "utf8")) as { seeds: SeedState }).seeds;
 }
 
-test.describe("Sprint 1 — Black-box acceptance gate", () => {
-  let seed: SeedState;
+function standaloneToken(studentId: string): string {
+  if (process.env.DEV_TOKEN) return process.env.DEV_TOKEN;
+  const secret = process.env.UNIVAI_STANDALONE_SECRET ?? DEFAULT_STANDALONE_SECRET;
+  return createHmac("sha256", secret).update(studentId).digest("hex");
+}
 
-  test.beforeAll(() => {
-    seed = loadFixture<{ seeds: SeedState }>("seed-state.json").seeds;
-  });
+test.describe.serial("Sprint 1 exam-facing black-box acceptance", () => {
+  const seed = loadSeed();
+  const headers = {
+    "x-univai-dev-token": standaloneToken(seed.student._id),
+  };
 
-  test("G1: Health endpoint reports standalone mode", async ({ request }) => {
+  test("G1: standalone health is ready with all seeded scenarios", async ({ request }) => {
     const response = await request.get(`${BASE_URL}/api/health`);
-    expect(response.ok()).toBeTruthy();
+    expect(response.status()).toBe(200);
+
     const body = await response.json();
-    expect(body).toHaveProperty("mode");
-    expect(body).toHaveProperty("mongo_ready");
+    expect(body).toMatchObject({
+      ok: true,
+      ready: true,
+      mode: "standalone",
+      mongo: "ready",
+      seededScenarios: 5,
+    });
   });
 
-  test("G2: Book upload creates curriculum and chapters", async ({ request }) => {
-    const bookPayload = {
-      title: "E2E Test: Computer Science Fundamentals",
-      original_filename: "e2e_cs_fundamentals.pdf",
-      storage_path: "/uploads/e2e_cs_fundamentals.pdf",
-      student_id: seed.student._id,
-    };
-
+  test("G2: book ingestion reaches ready state", async ({ request }) => {
     const response = await request.post(`${BASE_URL}/api/books`, {
-      data: bookPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
+      data: {
+        title: "E2E Computer Science Fundamentals",
+        original_filename: `e2e-cs-${process.pid}.pdf`,
+        storage_path: `/uploads/e2e-cs-${process.pid}.pdf`,
+        student_id: seed.student._id,
+      },
+      headers,
     });
 
-    expect(response.ok()).toBeTruthy();
+    expect(response.status()).toBe(201);
     const book = await response.json();
-    expect(book).toHaveProperty("_id");
-    expect(book).toHaveProperty("status", "ready");
+    expect(book._id).toMatch(/^[a-f0-9]{24}$/);
+    expect(book.status).toBe("ready");
+    expect(book.requested_by_student_id).toBe(seed.student._id);
   });
 
-  test("G3: Enrolled student can start a quiz", async ({ request }) => {
-    const quizPayload = {
-      student_id: seed.student._id,
-      chapter_id: seed.chapters[0]._id,
-    };
-
+  test("G3: quiz opens without leaking correct answers", async ({ request }) => {
     const response = await request.post(`${BASE_URL}/api/exams/quiz/start`, {
-      data: quizPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
+      data: {
+        student_id: seed.student._id,
+        chapter_id: seed.chapters[0]._id,
+      },
+      headers,
     });
 
     expect(response.ok()).toBeTruthy();
-    const body = await response.json();
-    const exam = body.exam || body;
-    expect(exam).toHaveProperty("_id");
-    expect(exam).toHaveProperty("type", "quiz");
-    expect(exam).toHaveProperty("generated_questions");
-    expect(Array.isArray(exam.generated_questions)).toBeTruthy();
+    const exam = await response.json();
+    expect(exam.type).toBe("quiz");
     expect(exam.generated_questions.length).toBeGreaterThan(0);
+    for (const question of exam.generated_questions as Question[]) {
+      expect(question.correct_option).toBeUndefined();
+    }
   });
 
-  test("G4: Quiz submission returns auto-graded result", async ({ request }) => {
-    const quizPayload = {
-      student_id: seed.student._id,
-      chapter_id: seed.chapters[0]._id,
-    };
-
+  test("G4: quiz submission is accepted and graded", async ({ request }) => {
     const startResponse = await request.post(`${BASE_URL}/api/exams/quiz/start`, {
-      data: quizPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
+      data: {
+        student_id: seed.student._id,
+        chapter_id: seed.chapters[0]._id,
+      },
+      headers,
     });
-
     expect(startResponse.ok()).toBeTruthy();
-    const startBody = await startResponse.json();
-    const exam = startBody.exam || startBody;
-    const questions = exam.generated_questions || [];
-    type Question = { question_id: string; type: string; correct_option?: string };
-    const answers = questions
-      .filter((q: Question) => q.type === "mcq")
-      .map((q: Question) => ({ question_id: q.question_id, answer: "A" }));
+
+    const exam = await startResponse.json();
+    const answers = (exam.generated_questions as Question[]).map((question) => ({
+      question_id: question.question_id,
+      answer: question.type === "mcq" ? "A" : "Evidence-based response",
+    }));
+    expect(answers.length).toBeGreaterThan(0);
 
     const submitResponse = await request.post(
       `${BASE_URL}/api/exams/${exam._id}/submit`,
-      {
-        data: { student_answers: answers },
-        headers: { "x-univai-dev-token": DEV_TOKEN },
-      }
+      { data: { student_answers: answers }, headers },
     );
-
     expect(submitResponse.ok()).toBeTruthy();
+
     const result = await submitResponse.json();
-    expect(result).toHaveProperty("taken", true);
-    expect(result).toHaveProperty("grading_status");
+    expect(result.taken).toBe(true);
     expect(["auto_graded", "pending_review"]).toContain(result.grading_status);
   });
 
-  test("G5: Proctoring event is accepted", async ({ request }) => {
-    const quizPayload = {
-      student_id: seed.student._id,
-      chapter_id: seed.chapters[1]._id,
-    };
-
-    const startResponse = await request.post(`${BASE_URL}/api/exams/quiz/start`, {
-      data: quizPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
-    });
-
-    expect(startResponse.ok()).toBeTruthy();
-    const startBody = await startResponse.json();
-    const examId = (startBody.exam || startBody)._id;
-
-    const eventResponse = await request.post(
+  test("G5: a proctoring observation is recorded for an active session", async ({
+    request,
+  }) => {
+    const examId = seed.scenario_exams.quiz_active._id;
+    const response = await request.post(
       `${BASE_URL}/api/exams/${examId}/proctoring-event`,
       {
-        data: { type: "devtools_open", student_id: seed.student._id },
-        headers: { "x-univai-dev-token": DEV_TOKEN },
-      }
+        data: {
+          type: "devtools_open",
+          student_id: seed.student._id,
+          metadata: { source: "sprint1-acceptance" },
+        },
+        headers,
+      },
     );
 
-    expect(eventResponse.ok()).toBeTruthy();
+    expect(response.status()).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true });
   });
 
-  test("G6: Final exam requires all quizzes passed", async ({ request }) => {
-    const finalPayload = {
-      student_id: seed.student._id,
-      curriculum_id: seed.curriculum._id,
-    };
+  test("G6: final exam remains locked until every quiz is passed", async ({
+    request,
+  }) => {
+    const enrollmentResponse = await request.post(`${BASE_URL}/api/enrollments`, {
+      data: {
+        student_id: seed.gate_student._id,
+        curriculum_id: seed.curriculum._id,
+        enrolled_at: "2026-07-30T00:00:00.000Z",
+        status: "active",
+      },
+      headers,
+    });
+    expect([201, 409]).toContain(enrollmentResponse.status());
 
     const response = await request.post(`${BASE_URL}/api/exams/final/start`, {
-      data: finalPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
+      data: {
+        student_id: seed.gate_student._id,
+        curriculum_id: seed.curriculum._id,
+      },
+      headers,
     });
 
-    /* The final may or may not be accessible depending on seed quiz state.
-       Accept either a success (exam started) or a 400-level denial. */
-    if (!response.ok()) {
-      const body = await response.json();
-      expect(body).toHaveProperty("error");
-      console.log(`Final start denied as expected: ${body.error}`);
-    } else {
-      const body = await response.json();
-      expect(body).toHaveProperty("_id");
-      expect(body).toHaveProperty("type", "final");
-    }
+    expect(response.status()).toBe(403);
+    const body = await response.json();
+    expect(body.error).toMatch(/pass|quiz|chapter/i);
   });
 
-  test("G7: Webhook payload matches contract schema", async ({ request }) => {
-    /* Verify the deployed exam returns a webhook-shaped response on download/status. */
-    const quizPayload = {
-      student_id: seed.student._id,
-      chapter_id: seed.chapters[2]._id,
-    };
-
-    const startResponse = await request.post(`${BASE_URL}/api/exams/quiz/start`, {
-      data: quizPayload,
-      headers: { "x-univai-dev-token": DEV_TOKEN },
-    });
-
-    if (!startResponse.ok()) return;
-    const startBody = await startResponse.json();
-    const examId = (startBody.exam || startBody)._id;
-
-    const response = await request.get(`${BASE_URL}/api/exams/${examId}`, {
-      headers: { "x-univai-dev-token": DEV_TOKEN },
-    });
-
-    if (response.ok()) {
-      const body = await response.json();
-      expect(body).toHaveProperty("_id");
-      expect(body).toHaveProperty("student_id");
+  test("G7: submission produces a trusted-result webhook capture", async ({
+    request,
+  }) => {
+    let capture: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 20 && !capture; attempt += 1) {
+      const response = await request.get(`${BASE_URL}/api/dev/webhooks`, { headers });
+      expect(response.ok()).toBeTruthy();
+      const body = (await response.json()) as {
+        captures: Array<{ payload?: Record<string, unknown> }>;
+      };
+      capture = body.captures
+        .map((item) => item.payload)
+        .find((payload) => payload?.student_id === seed.student._id);
+      if (!capture) await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     }
+
+    expect(capture).toBeDefined();
+    expect(capture).toMatchObject({
+      type: "quiz",
+      student_id: seed.student._id,
+      integrity_status: expect.stringMatching(/^(clean|invalidated)$/),
+      grading_status: expect.stringMatching(/^(auto_graded|pending_review|graded)$/),
+    });
+    expect(capture?.report).toBeDefined();
   });
 });

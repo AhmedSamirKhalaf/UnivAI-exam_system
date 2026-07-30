@@ -33,6 +33,7 @@ const REQUIRED_RUBRIC_FIELDS = ["max_score", "criteria"];
 let passed = 0;
 let failed = 0;
 const errors = [];
+const seenIds = new Set();
 
 function validateCase(caseObj, lineNum) {
   const label = `line ${lineNum} (id: ${caseObj.id || "MISSING"})`;
@@ -48,6 +49,11 @@ function validateCase(caseObj, lineNum) {
     errors.push(`${label}: "id" must be a non-empty string`);
     return false;
   }
+  if (seenIds.has(caseObj.id)) {
+    errors.push(`${label}: duplicate case ID`);
+    return false;
+  }
+  seenIds.add(caseObj.id);
 
   if (!VALID_CATEGORIES.includes(caseObj.category)) {
     errors.push(`${label}: invalid category "${caseObj.category}". Valid: ${VALID_CATEGORIES.join(", ")}`);
@@ -72,18 +78,28 @@ function validateCase(caseObj, lineNum) {
     return false;
   }
 
-  if (exp.answer_contains && !Array.isArray(exp.answer_contains)) {
-    errors.push(`${label}: expected.answer_contains must be an array`);
-    return false;
+  for (const field of ["answer_contains", "source_ids", "source_locations"]) {
+    if (
+      field in exp &&
+      (!Array.isArray(exp[field]) ||
+        exp[field].some((value) => typeof value !== "string" || !value.trim()))
+    ) {
+      errors.push(`${label}: expected.${field} must be an array of non-empty strings`);
+      return false;
+    }
   }
 
-  if (exp.source_ids && !Array.isArray(exp.source_ids)) {
-    errors.push(`${label}: expected.source_ids must be an array`);
+  if (exp.refused && (exp.source_ids?.length || exp.source_locations?.length)) {
+    errors.push(`${label}: refused cases cannot expect citations`);
     return false;
   }
-
-  if (exp.source_locations && !Array.isArray(exp.source_locations)) {
-    errors.push(`${label}: expected.source_locations must be an array`);
+  if (
+    ["answerable_source_grounded", "wrong_missing_citation", "arabic_sample"].includes(
+      caseObj.category,
+    ) &&
+    (!exp.source_ids?.length || !exp.source_locations?.length)
+  ) {
+    errors.push(`${label}: grounded cases require expected source IDs and locations`);
     return false;
   }
 
@@ -115,6 +131,13 @@ function validateCase(caseObj, lineNum) {
       errors.push(`${label}: rubric.criteria[${i}] must have positive "weight"`);
       return false;
     }
+  }
+  const totalWeight = rub.criteria.reduce((total, criterion) => total + criterion.weight, 0);
+  if (totalWeight !== rub.max_score) {
+    errors.push(
+      `${label}: rubric criteria weights (${totalWeight}) must equal max_score (${rub.max_score})`,
+    );
+    return false;
   }
 
   return true;
@@ -162,6 +185,13 @@ function main() {
   }
 
   const categories = new Set(lines.map((l) => JSON.parse(l).category));
+  for (const category of VALID_CATEGORIES) {
+    if (!categories.has(category)) errors.push(`Dataset is missing category "${category}"`);
+  }
+  if (errors.length) {
+    for (const error of errors) console.log(`  ❌ ${error}`);
+    process.exit(1);
+  }
   console.log(`\nCategories covered (${categories.size}):`);
   for (const cat of [...categories].sort()) {
     console.log(`  ✓ ${cat}`);
