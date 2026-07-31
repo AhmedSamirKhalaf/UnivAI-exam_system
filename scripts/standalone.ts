@@ -10,6 +10,7 @@ import {
   Enrollment,
   Exam,
   ExamSession,
+  IntegrityEvent,
   IntegrityAppeal,
   ProctoringEvent,
   Student,
@@ -280,6 +281,7 @@ async function reset(): Promise<void> {
   await Promise.all([
     Exam.deleteMany({ _id: { $in: examIds } }),
     ExamSession.deleteMany({ exam_id: { $in: examIds } }),
+    IntegrityEvent.deleteMany({ exam_id: { $in: examIds } }),
     ProctoringEvent.deleteMany({ exam_id: { $in: examIds } }),
     IntegrityAppeal.deleteMany({ exam_id: { $in: examIds } }),
     Enrollment.deleteMany({ student_id: IDS.student }),
@@ -362,14 +364,7 @@ async function main(): Promise<void> {
     await mongoose.disconnect();
     const child = spawn(
       process.execPath,
-      [
-        path.resolve("node_modules", "next", "dist", "bin", "next"),
-        "dev",
-        "-H",
-        "0.0.0.0",
-        "-p",
-        "3200",
-      ],
+      [path.resolve("node_modules", "tsx", "dist", "cli.mjs"), "server.ts", "dev"],
       {
         stdio: "inherit",
         env: {

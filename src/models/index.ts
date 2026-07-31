@@ -45,6 +45,9 @@ export type {
   ProctoringEventType,
 } from "./ProctoringEvent";
 
+export { IntegrityEvent } from "./IntegrityEvent";
+export type { IIntegrityEvent } from "./IntegrityEvent";
+
 export { AssessmentBlueprint } from "./AssessmentBlueprint";
 export type {
   IAssessmentBlueprint,

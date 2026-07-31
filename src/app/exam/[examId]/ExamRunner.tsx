@@ -26,6 +26,8 @@ import {
   getDevToolsDimensionSignal,
   getRestrictedShortcut,
 } from "@/lib/proctoring-signals";
+import { useExamIntegrityChannel } from "@/lib/use-exam-integrity-channel";
+import type { IntegrityEventType } from "@/lib/integrity-protocol";
 
 type Question = {
   question_id: string;
@@ -109,6 +111,13 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     };
   }, [examId, requestHeaders]);
 
+  const { status: channelStatus, sendEvent } = useExamIntegrityChannel({
+    examId,
+    enabled: Boolean(exam && !exam.taken),
+    accessTokenRef,
+    devToken,
+  });
+
   const report = useCallback(
     (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
       const current = examRef.current;
@@ -117,17 +126,31 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       if (now - (lastReportAtRef.current[type] ?? 0) < 1000) return;
       lastReportAtRef.current[type] = now;
 
-      fetch(`/api/exams/${examId}/proctoring-event`, {
-        method: "POST",
-        headers: requestHeaders(true),
-        body: JSON.stringify({ type, metadata }),
-      })
-        .then((response) => {
-          if (response.ok) setWarnings((count) => count + 1);
-        })
-        .catch(() => undefined);
+      let eventType: IntegrityEventType;
+      if (type === "tab_switch") {
+        eventType = metadata && "via" in metadata ? "window_blur" : "visibility_hidden";
+      } else if (type === "copy_paste") {
+        const kind = metadata && "kind" in metadata ? String(metadata.kind) : "copy";
+        eventType = kind === "paste" ? "clipboard_paste_attempt" : "clipboard_copy_attempt";
+      } else if (type === "fullscreen_exit") {
+        eventType = "fullscreen_exit";
+      } else {
+        const method = metadata && "method" in metadata ? String(metadata.method) : "";
+        eventType = method === "dimension_heuristic"
+          ? "devtools_dimension_suspected"
+          : "restricted_shortcut";
+      }
+      const safeMetadata = Object.fromEntries(
+        Object.entries(metadata ?? {}).flatMap(([key, value]) =>
+          ["string", "number", "boolean"].includes(typeof value)
+            ? [[key, value as string | number | boolean]]
+            : [],
+        ),
+      );
+      sendEvent(eventType, safeMetadata);
+      setWarnings((count) => count + 1);
     },
-    [examId, requestHeaders],
+    [sendEvent],
   );
 
   useEffect(() => {
@@ -252,7 +275,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     <Stack spacing={3}>
       <Typography variant="h4">{exam.title}</Typography>
       <Alert severity="warning">
-        Exam activity is monitored. Common copy, tab, fullscreen, and developer-tool actions are recorded
+        Exam activity is monitored. Integrity channel: {channelStatus}. Common copy, tab, fullscreen, and developer-tool actions are recorded
         {warnings ? ` (${warnings} notice${warnings === 1 ? "" : "s"})` : ""}.
       </Alert>
       <LinearProgress variant="determinate" value={progressValue} />
