@@ -28,6 +28,7 @@ import {
 } from "@/lib/proctoring-signals";
 import { useExamIntegrityChannel } from "@/lib/use-exam-integrity-channel";
 import type { IntegrityEventType } from "@/lib/integrity-protocol";
+import { ExamListenerRegistry } from "@/lib/exam-listener-registry";
 
 type Question = {
   question_id: string;
@@ -46,6 +47,8 @@ type ExamAttempt = {
   progress: { position: number; total: number; answered: number };
   answer_revision: number;
   can_submit: boolean;
+  integrity_state: "active" | "reconnecting" | "grace" | "integrity_locked" | "submitted";
+  lock_reason?: string;
 };
 
 type Props = { examId: string; returnUrl: string; devToken?: string };
@@ -61,6 +64,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const examRef = useRef<ExamAttempt | null>(null);
   const accessTokenRef = useRef<string | null>(null);
+  const listenerRegistryRef = useRef<ExamListenerRegistry | null>(null);
   const lastReportAtRef = useRef<Record<string, number>>({});
 
   const requestHeaders = useCallback(
@@ -111,10 +115,11 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     };
   }, [examId, requestHeaders]);
 
-  const { status: channelStatus, sendEvent } = useExamIntegrityChannel({
+  const { status: channelStatus, lockReason, sendEvent } = useExamIntegrityChannel({
     examId,
     enabled: Boolean(exam && !exam.taken),
     accessTokenRef,
+    listenerRegistryRef,
     devToken,
   });
 
@@ -159,17 +164,16 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     const onFullscreen = () => !document.fullscreenElement && report("fullscreen_exit");
     const onBlur = () => !document.hidden && report("tab_switch", { via: "window_blur" });
 
-    document.addEventListener("visibilitychange", onVisibility);
-    document.addEventListener("copy", onCopyPaste);
-    document.addEventListener("paste", onCopyPaste);
-    document.addEventListener("fullscreenchange", onFullscreen);
-    window.addEventListener("blur", onBlur);
+    const registry = new ExamListenerRegistry("exam-listeners-v1");
+    listenerRegistryRef.current = registry;
+    registry.register({ name: "visibility", target: document, type: "visibilitychange", handler: onVisibility });
+    registry.register({ name: "copy", target: document, type: "copy", handler: onCopyPaste as EventListener });
+    registry.register({ name: "paste", target: document, type: "paste", handler: onCopyPaste as EventListener });
+    registry.register({ name: "fullscreen", target: document, type: "fullscreenchange", handler: onFullscreen });
+    registry.register({ name: "blur", target: window, type: "blur", handler: onBlur });
     return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      document.removeEventListener("copy", onCopyPaste);
-      document.removeEventListener("paste", onCopyPaste);
-      document.removeEventListener("fullscreenchange", onFullscreen);
-      window.removeEventListener("blur", onBlur);
+      registry.dispose();
+      if (listenerRegistryRef.current === registry) listenerRegistryRef.current = null;
     };
   }, [report]);
 
@@ -191,10 +195,15 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       report("devtools_open", { method: "restricted_shortcut", confidence: "medium", shortcut });
     };
     const intervalId = window.setInterval(sampleDimensions, 3000);
-    document.addEventListener("keydown", onKeyDown);
+    listenerRegistryRef.current?.register({
+      name: "restricted-shortcuts",
+      target: document,
+      type: "keydown",
+      handler: onKeyDown as EventListener,
+      options: { capture: true },
+    });
     return () => {
       window.clearInterval(intervalId);
-      document.removeEventListener("keydown", onKeyDown);
     };
   }, [report]);
 
@@ -284,7 +293,16 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       </Typography>
       {savedMessage ? <Alert severity="success" role="status">{savedMessage}</Alert> : null}
 
-      {question ? (
+      {channelStatus === "locked" || exam.integrity_state === "integrity_locked" ? (
+        <Alert severity="error" role="alert">
+          <AlertTitle>Exam paused for integrity review</AlertTitle>
+          {lockReason ?? exam.lock_reason ?? "The server locked this attempt. Your accepted answers were preserved."}
+        </Alert>
+      ) : channelStatus === "grace" ? (
+        <Alert severity="warning" role="status">
+          The integrity connection is in its grace period. Question changes are paused while we reconnect.
+        </Alert>
+      ) : question ? (
         <Card variant="outlined">
           <CardContent>
             <Stack spacing={2}>

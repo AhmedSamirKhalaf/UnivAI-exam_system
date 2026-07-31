@@ -26,6 +26,8 @@ export type ExamAttemptView = {
   };
   answer_revision: number;
   can_submit: boolean;
+  integrity_state: "active" | "reconnecting" | "grace" | "integrity_locked" | "submitted";
+  lock_reason?: string;
 };
 
 export class ExamAttemptError extends Error {
@@ -130,7 +132,12 @@ export function buildExamAttemptView(
   >,
   session: Pick<
     IExamSession,
-    "current_question_index" | "answer_revision" | "answers" | "status"
+    | "current_question_index"
+    | "answer_revision"
+    | "answers"
+    | "status"
+    | "integrity_state"
+    | "integrity_lock_reason"
   > | null,
 ): ExamAttemptView {
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
@@ -138,7 +145,11 @@ export function buildExamAttemptView(
     Math.max(0, session?.current_question_index ?? 0),
     questions.length,
   );
-  const active = !exam.taken && session?.status === "in_progress";
+  const integrityState = session?.integrity_state ?? (exam.taken ? "submitted" : "active");
+  const active =
+    !exam.taken &&
+    session?.status === "in_progress" &&
+    integrityState === "active";
 
   return {
     _id: exam._id.toString(),
@@ -156,6 +167,10 @@ export function buildExamAttemptView(
     },
     answer_revision: session?.answer_revision ?? 0,
     can_submit: active && index >= questions.length,
+    integrity_state: integrityState,
+    ...(session?.integrity_lock_reason
+      ? { lock_reason: session.integrity_lock_reason }
+      : {}),
   };
 }
 
@@ -195,7 +210,11 @@ export async function saveCurrentAnswer(
 
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
   const session = await ExamSession.findOne({ exam_id: exam._id });
-  if (!session || session.status !== "in_progress") {
+  if (
+    !session ||
+    session.status !== "in_progress" ||
+    session.integrity_state !== "active"
+  ) {
     throw new ExamAttemptError("Exam session is not active", 409);
   }
 
@@ -219,6 +238,7 @@ export async function saveCurrentAnswer(
     {
       _id: session._id,
       status: "in_progress",
+      integrity_state: "active",
       current_question_index: index,
       answer_revision: revision,
     },
@@ -250,7 +270,11 @@ export async function getServerStoredAnswers(
   if (!exam) throw new ExamAttemptError("Exam not found", 404);
   const session = await ExamSession.findOne({ exam_id: exam._id });
   const total = exam.generated_questions?.length ?? 0;
-  if (!session || session.status !== "in_progress") {
+  if (
+    !session ||
+    session.status !== "in_progress" ||
+    session.integrity_state !== "active"
+  ) {
     throw new ExamAttemptError("Exam session is not active", 409);
   }
   if (session.current_question_index < total) {

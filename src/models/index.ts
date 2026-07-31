@@ -37,6 +37,7 @@ export type {
   IExamSession,
   SessionStatus,
   TerminatedReason,
+  IntegritySessionState,
 } from "./ExamSession";
 
 export { ProctoringEvent } from "./ProctoringEvent";

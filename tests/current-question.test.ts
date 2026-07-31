@@ -36,6 +36,8 @@ test("attempt view exposes only the current public question", () => {
     answer_revision: 0,
     answers: [],
     status: "in_progress",
+    integrity_state: "active",
+    integrity_lock_reason: undefined,
   });
 
   assert.equal(view.current_question?.question_id, "q_1");
@@ -51,6 +53,8 @@ test("attempt view advances by server session state", () => {
     answer_revision: 1,
     answers: [{ question_id: "q_1", answer: "A" }],
     status: "in_progress",
+    integrity_state: "active",
+    integrity_lock_reason: undefined,
   });
 
   assert.equal(view.current_question?.question_id, "q_2");
