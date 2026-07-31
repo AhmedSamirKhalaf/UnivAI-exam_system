@@ -1,36 +1,21 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Exam } from "@/models/Exam";
 import {
-  stripCorrectOption,
-  examToPlain,
-} from "@/lib/business-logic";
-import { assertStandaloneRequest } from "@/lib/runtime";
+  examAttemptErrorResponse,
+  getExamAttemptView,
+  requireExamAttempt,
+} from "@/lib/exam-attempt";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
-    assertStandaloneRequest(_request);
     await connectDB();
     const { examId } = await params;
-
-    const exam = await Exam.findById(examId);
-    if (!exam) {
-      return Response.json({ error: "Exam not found" }, { status: 404 });
-    }
-
-    let result = examToPlain(exam);
-    if (!exam.taken) {
-      result = stripCorrectOption(result);
-    }
-
-    return Response.json(result);
+    const session = await requireExamAttempt(_request, examId);
+    return Response.json(await getExamAttemptView(examId, session));
   } catch (error: unknown) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return examAttemptErrorResponse(error);
   }
 }

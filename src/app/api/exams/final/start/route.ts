@@ -3,15 +3,14 @@ import { connectDB } from "@/lib/db";
 import {
   canStartFinal,
   startFinal,
-  stripCorrectOption,
-  examToPlain,
 } from "@/lib/business-logic";
+import { createExamLaunch, examAttemptErrorResponse } from "@/lib/exam-attempt";
 
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
     const body = await request.json();
-    const { student_id, curriculum_id } = body;
+    const { student_id, curriculum_id, student_sid } = body;
 
     if (!student_id || !curriculum_id) {
       return Response.json(
@@ -25,14 +24,12 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: check.reason }, { status: 403 });
     }
 
-    const exam = await startFinal(student_id, curriculum_id);
-    const safeExam = stripCorrectOption(examToPlain(exam));
-
-    return Response.json(safeExam, { status: 200 });
-  } catch (error: unknown) {
+    const exam = await startFinal(student_id, curriculum_id, student_sid);
     return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      await createExamLaunch(exam, request.nextUrl.origin),
+      { status: 200 },
     );
+  } catch (error: unknown) {
+    return examAttemptErrorResponse(error);
   }
 }

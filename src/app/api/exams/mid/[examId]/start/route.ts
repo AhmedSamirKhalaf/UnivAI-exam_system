@@ -2,9 +2,8 @@ import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import {
   startMid,
-  stripCorrectOption,
-  examToPlain,
 } from "@/lib/business-logic";
+import { createExamLaunch, examAttemptErrorResponse } from "@/lib/exam-attempt";
 
 export async function POST(
   request: NextRequest,
@@ -16,13 +15,11 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
 
     const exam = await startMid(examId, body?.question_count, body?.student_sid);
-    const safeExam = stripCorrectOption(examToPlain(exam));
-
-    return Response.json(safeExam, { status: 200 });
-  } catch (error: unknown) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      await createExamLaunch(exam, request.nextUrl.origin),
+      { status: 200 },
     );
+  } catch (error: unknown) {
+    return examAttemptErrorResponse(error);
   }
 }

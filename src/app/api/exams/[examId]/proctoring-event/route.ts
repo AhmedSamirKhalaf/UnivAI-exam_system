@@ -5,7 +5,7 @@ import {
   recordDiscreteEvent,
   recordCameraEvent,
 } from "@/lib/business-logic";
-import { assertStandaloneRequest } from "@/lib/runtime";
+import { examAttemptErrorResponse, requireExamAttempt } from "@/lib/exam-attempt";
 
 const CAMERA_EVENT_TYPES = ["no_face", "multiple_faces"];
 const DISCRETE_EVENT_TYPES = [
@@ -21,15 +21,15 @@ export async function POST(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
-    assertStandaloneRequest(request);
     await connectDB();
     const { examId } = await params;
+    const session = await requireExamAttempt(request, examId);
     const body = await request.json();
-    const { type, student_id, detected, metadata } = body;
+    const { type, detected, metadata } = body;
 
-    if (!type || !student_id) {
+    if (!type) {
       return Response.json(
-        { error: "type and student_id are required" },
+        { error: "type is required" },
         { status: 400 }
       );
     }
@@ -48,12 +48,15 @@ export async function POST(
       }
       await recordCameraEvent(
         examId,
-        student_id,
+        session?.student_id ?? exam.student_id,
         type as "no_face" | "multiple_faces",
         detected ?? true
       );
     } else {
-      await recordDiscreteEvent(examId, student_id, type, metadata);
+      if (!session) {
+        return Response.json({ error: "Exam session not found" }, { status: 409 });
+      }
+      await recordDiscreteEvent(examId, session.student_id, type, metadata);
     }
 
     return Response.json({ success: true }, { status: 200 });
@@ -67,6 +70,6 @@ export async function POST(
     ) {
       return Response.json({ error: message }, { status: 400 });
     }
-    return Response.json({ error: message }, { status: 500 });
+    return examAttemptErrorResponse(error);
   }
 }

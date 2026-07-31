@@ -27,14 +27,6 @@ import {
   getRestrictedShortcut,
 } from "@/lib/proctoring-signals";
 
-/**
- * The exam-taking screen. Pure MUI: no CSS files, no sx, no styled().
- *
- * Proctoring: leaving the tab, exiting fullscreen, and copy/paste are reported
- * to the proctoring API while the exam is open. The suspicion score they feed
- * lives on the exam session and comes back to the UnivAI app with the result.
- */
-
 type Question = {
   question_id: string;
   prompt: string;
@@ -42,38 +34,56 @@ type Question = {
   options?: string[];
 };
 
-type Exam = {
+type ExamAttempt = {
   _id: string;
   type: "quiz" | "mid" | "final";
   title: string;
-  student_id: string;
   taken: boolean;
-  mark?: number;
-  passing_mark?: number;
-  passed: boolean;
   integrity_status: "clean" | "invalidated";
-  generated_questions?: Question[];
+  current_question: Question | null;
+  progress: { position: number; total: number; answered: number };
+  answer_revision: number;
+  can_submit: boolean;
 };
 
 type Props = { examId: string; returnUrl: string; devToken?: string };
 
 export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
-  const [exam, setExam] = useState<Exam | null>(null);
+  const [exam, setExam] = useState<ExamAttempt | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answer, setAnswer] = useState("");
+  const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
-  const examRef = useRef<Exam | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const examRef = useRef<ExamAttempt | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
   const lastReportAtRef = useRef<Record<string, number>>({});
+
+  const requestHeaders = useCallback(
+    (json = false, token = accessTokenRef.current): HeadersInit => ({
+      ...(json ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(devToken ? { "x-univai-dev-token": devToken } : {}),
+    }),
+    [devToken],
+  );
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const token = fragment.get("attempt_token");
+    if (token) {
+      accessTokenRef.current = token;
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+
     fetch(`/api/exams/${examId}`, {
       cache: "no-store",
-      headers: devToken ? { "x-univai-dev-token": devToken } : undefined,
+      headers: requestHeaders(false, token),
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -91,50 +101,40 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
             : err instanceof Error ? err.message : "Could not load the exam.");
         }
       });
+
     return () => {
       active = false;
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [examId, devToken]);
+  }, [examId, requestHeaders]);
 
-  /** Report a proctoring event. Never throws: proctoring must not break the exam. */
   const report = useCallback(
     (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
       const current = examRef.current;
       if (!current || current.taken) return;
-
       const now = Date.now();
       if (now - (lastReportAtRef.current[type] ?? 0) < 1000) return;
       lastReportAtRef.current[type] = now;
 
       fetch(`/api/exams/${examId}/proctoring-event`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
-        },
-        body: JSON.stringify({ type, student_id: current.student_id, metadata }),
+        headers: requestHeaders(true),
+        body: JSON.stringify({ type, metadata }),
       })
         .then((response) => {
           if (response.ok) setWarnings((count) => count + 1);
         })
         .catch(() => undefined);
     },
-    [examId, devToken]
+    [examId, requestHeaders],
   );
 
   useEffect(() => {
-    const onVisibility = () => {
-      if (document.hidden) report("tab_switch");
-    };
+    const onVisibility = () => document.hidden && report("tab_switch");
     const onCopyPaste = (event: ClipboardEvent) => report("copy_paste", { kind: event.type });
-    const onFullscreen = () => {
-      if (!document.fullscreenElement) report("fullscreen_exit");
-    };
-    const onBlur = () => {
-      if (!document.hidden) report("tab_switch", { via: "window_blur" });
-    };
+    const onFullscreen = () => !document.fullscreenElement && report("fullscreen_exit");
+    const onBlur = () => !document.hidden && report("tab_switch", { via: "window_blur" });
 
     document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("copy", onCopyPaste);
@@ -150,72 +150,77 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     };
   }, [report]);
 
-  /**
-   * Record developer-tool signals without claiming certainty. Browser JavaScript
-   * cannot reliably prove that DevTools is open, so the dimension heuristic
-   * requires two consecutive samples and reports at most once per exam.
-   */
   useEffect(() => {
     let consecutiveDimensionSignals = 0;
     let dimensionSignalReported = false;
-
-    function sampleDimensions() {
+    const sampleDimensions = () => {
       const signal = getDevToolsDimensionSignal(window);
       consecutiveDimensionSignals = signal ? consecutiveDimensionSignals + 1 : 0;
       if (signal && consecutiveDimensionSignals >= 2 && !dimensionSignalReported) {
         dimensionSignalReported = true;
-        report("devtools_open", {
-          method: "dimension_heuristic",
-          confidence: "low",
-          ...signal,
-        });
+        report("devtools_open", { method: "dimension_heuristic", confidence: "low", ...signal });
       }
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
       const shortcut = getRestrictedShortcut(event);
       if (!shortcut) return;
-
       event.preventDefault();
-      report("devtools_open", {
-        method: "restricted_shortcut",
-        confidence: "medium",
-        shortcut,
-      });
-    }
-
+      report("devtools_open", { method: "restricted_shortcut", confidence: "medium", shortcut });
+    };
     const intervalId = window.setInterval(sampleDimensions, 3000);
     document.addEventListener("keydown", onKeyDown);
-
     return () => {
       window.clearInterval(intervalId);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [report]);
 
+  async function saveAndContinue(action: "answer" | "skip") {
+    const current = exam?.current_question;
+    if (!exam || !current) return;
+    setSaving(true);
+    setError(null);
+    setSavedMessage(null);
+    try {
+      const response = await fetch(`/api/exams/${examId}/answer`, {
+        method: "POST",
+        headers: requestHeaders(true),
+        body: JSON.stringify({
+          question_id: current.question_id,
+          answer,
+          action,
+          revision: exam.answer_revision,
+          idempotency_key: crypto.randomUUID(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not save the answer.");
+      setExam(data);
+      examRef.current = data;
+      setAnswer("");
+      setSavedMessage(action === "skip" ? "Question skipped and saved." : "Answer saved.");
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Could not save the answer.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function submit() {
-    if (!exam) return;
+    if (!exam?.can_submit) return;
     setSubmitting(true);
     setError(null);
     try {
-      const student_answers = (exam.generated_questions ?? []).map((question) => ({
-        question_id: question.question_id,
-        answer: answers[question.question_id] ?? "",
-      }));
-      const res = await fetch(`/api/exams/${examId}/submit`, {
+      const response = await fetch(`/api/exams/${examId}/submit`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
-        },
-        body: JSON.stringify({ student_answers }),
+        headers: requestHeaders(),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Submission failed.");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Submission failed.");
       setExam(data);
       examRef.current = data;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Submission failed.");
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : "Submission failed.");
     } finally {
       setSubmitting(false);
       setConfirmOpen(false);
@@ -223,148 +228,83 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   }
 
   if (error && !exam) {
-    return (
-      <Alert severity="error">
-        <AlertTitle>Could not open the exam</AlertTitle>
-        {error}
-      </Alert>
-    );
+    return <Alert severity="error"><AlertTitle>Could not open the exam</AlertTitle>{error}</Alert>;
   }
   if (!exam) return <CircularProgress />;
 
-  // ---------------------------------------------------------------- submitted view
-  // No result is shown HERE: grading and the proctoring review live in UnivAI.
-  // The exam hall only confirms the hand-in and sends the student back.
   if (exam.taken) {
     return (
       <Stack spacing={3}>
         <Typography variant="h4">{exam.title}</Typography>
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">Answers submitted</Typography>
-              <Alert severity="success">
-                Your answers and the proctoring observations were sent to UnivAI for
-                the configured policy and review process. Your grade will appear on
-                your dashboard once it is recorded.
-              </Alert>
-              <Grid container spacing={2}>
-                <Grid>
-                  <Button variant="contained" href={`${returnUrl}/exams`}>
-                    Back to UnivAI
-                  </Button>
-                </Grid>
-                <Grid>
-                  <Button variant="outlined" href={`${returnUrl}/dashboard`}>
-                    See your dashboard
-                  </Button>
-                </Grid>
-              </Grid>
-            </Stack>
-          </CardContent>
-        </Card>
+        <Alert severity="success">Your answers were submitted and sent to UnivAI for grading and review.</Alert>
+        <Grid container spacing={2}>
+          <Grid><Button variant="contained" href={`${returnUrl}/exams`}>Back to UnivAI</Button></Grid>
+          <Grid><Button variant="outlined" href={`${returnUrl}/dashboard`}>See your dashboard</Button></Grid>
+        </Grid>
       </Stack>
     );
   }
 
-  // ---------------------------------------------------------------- taking view
-  const questions = exam.generated_questions ?? [];
-  const answered = questions.filter((q) => (answers[q.question_id] ?? "").trim()).length;
+  const question = exam.current_question;
+  const progressValue = (exam.progress.answered / Math.max(1, exam.progress.total)) * 100;
 
   return (
     <Stack spacing={3}>
       <Typography variant="h4">{exam.title}</Typography>
-
       <Alert severity="warning">
-        You are being proctored: leaving this tab, copy/paste, exiting fullscreen,
-        and developer-tool signals are recorded
-        {warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
+        Exam activity is monitored. Common copy, tab, fullscreen, and developer-tool actions are recorded
+        {warnings ? ` (${warnings} notice${warnings === 1 ? "" : "s"})` : ""}.
       </Alert>
-
-      <LinearProgress variant="determinate" value={(answered / Math.max(1, questions.length)) * 100} />
+      <LinearProgress variant="determinate" value={progressValue} />
       <Typography variant="body2" color="text.secondary">
-        {answered} of {questions.length} answered
+        {exam.progress.answered} of {exam.progress.total} completed
       </Typography>
+      {savedMessage ? <Alert severity="success" role="status">{savedMessage}</Alert> : null}
 
-      {questions.map((question, index) => (
-        <Card key={question.question_id} variant="outlined">
+      {question ? (
+        <Card variant="outlined">
           <CardContent>
             <Stack spacing={2}>
-              <Typography variant="subtitle1">
-                {index + 1}. {question.prompt}
-              </Typography>
-
+              <Typography variant="overline">Question {exam.progress.position} of {exam.progress.total}</Typography>
+              <Typography variant="h6">{question.prompt}</Typography>
               {question.type === "mcq" ? (
                 <FormControl>
                   <FormLabel>Choose one</FormLabel>
-                  <RadioGroup
-                    value={answers[question.question_id] ?? ""}
-                    onChange={(event) =>
-                      setAnswers((previous) => ({
-                        ...previous,
-                        [question.question_id]: event.target.value,
-                      }))
-                    }
-                  >
+                  <RadioGroup value={answer} onChange={(event) => setAnswer(event.target.value)}>
                     {(question.options ?? []).map((option) => (
-                      <FormControlLabel
-                        key={option}
-                        // Their grader compares against the leading letter ("A".."D").
-                        value={option.slice(0, 1)}
-                        control={<Radio />}
-                        label={option}
-                      />
+                      <FormControlLabel key={option} value={option.slice(0, 1)} control={<Radio />} label={option} />
                     ))}
                   </RadioGroup>
                 </FormControl>
               ) : (
-                <TextField
-                  multiline
-                  minRows={4}
-                  fullWidth
-                  label="Your answer"
-                  value={answers[question.question_id] ?? ""}
-                  onChange={(event) =>
-                    setAnswers((previous) => ({
-                      ...previous,
-                      [question.question_id]: event.target.value,
-                    }))
-                  }
-                />
+                <TextField multiline minRows={4} fullWidth label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} />
               )}
+              <Grid container spacing={2}>
+                <Grid><Button variant="outlined" disabled={saving} onClick={() => void saveAndContinue("skip")}>Skip</Button></Grid>
+                <Grid><Button variant="contained" disabled={saving || !answer.trim()} onClick={() => void saveAndContinue("answer")}>{saving ? "Saving…" : "Save and continue"}</Button></Grid>
+              </Grid>
             </Stack>
           </CardContent>
         </Card>
-      ))}
+      ) : (
+        <Card variant="outlined">
+          <CardContent>
+            <Stack spacing={2}>
+              <Typography variant="h6">All questions completed</Typography>
+              <Typography color="text.secondary">Your {exam.progress.total} answers and skips are stored on the server.</Typography>
+              <Button variant="contained" size="large" disabled={!exam.can_submit || submitting} onClick={() => setConfirmOpen(true)}>Submit exam</Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
 
-      {error ? <Alert severity="error">{error}</Alert> : null}
-
-      <Grid container spacing={2}>
-        <Grid>
-          <Button
-            variant="contained"
-            size="large"
-            disabled={submitting}
-            onClick={() => setConfirmOpen(true)}
-          >
-            Submit exam
-          </Button>
-        </Grid>
-      </Grid>
-
+      {error ? <Alert severity="error" role="alert">{error}</Alert> : null}
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <DialogTitle>Submit your answers?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            You answered {answered} of {questions.length} questions. You cannot change
-            your answers after submitting.
-          </DialogContentText>
-        </DialogContent>
+        <DialogContent><DialogContentText>You completed all {exam.progress.total} questions. You cannot change them after submitting.</DialogContentText></DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Keep working</Button>
-          <Button variant="contained" onClick={submit} disabled={submitting}>
-            {submitting ? "Submitting…" : "Submit"}
-          </Button>
+          <Button variant="contained" onClick={() => void submit()} disabled={submitting}>{submitting ? "Submitting…" : "Submit"}</Button>
         </DialogActions>
       </Dialog>
     </Stack>

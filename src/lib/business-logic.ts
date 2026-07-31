@@ -492,7 +492,8 @@ export async function createMid(
 
 export async function startFinal(
   studentId: string | mongoose.Types.ObjectId,
-  curriculumId: string | mongoose.Types.ObjectId
+  curriculumId: string | mongoose.Types.ObjectId,
+  studentSid?: string,
 ): Promise<IExam> {
   const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
   const curriculumIdObj = new mongoose.Types.ObjectId(
@@ -501,6 +502,7 @@ export async function startFinal(
 
   const existingFinal = await Exam.findOne({
     student_id: studentIdObj,
+    student_sid: studentSid,
     curriculum_id: curriculumIdObj,
     type: "final",
   });

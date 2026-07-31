@@ -11,6 +11,9 @@ export const examSessionSchema = z.object({
   suspicion_score: z.number().min(0).default(0),
   flagged: z.boolean().default(false),
   status: z.enum(["in_progress", "completed", "terminated"]),
+  current_question_index: z.number().int().min(0).default(0),
+  answer_revision: z.number().int().min(0).default(0),
+  answers: z.array(z.record(z.string(), z.unknown())).default([]),
   terminated_reason: z
     .enum([
       "suspicion_threshold",
