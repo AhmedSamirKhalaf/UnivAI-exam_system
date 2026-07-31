@@ -44,6 +44,12 @@ export interface IExamSession extends Document {
   heartbeat_registry_version?: string;
   heartbeat_registry_digest?: string;
   heartbeat_client_build?: string;
+  risk_score: number;
+  risk_probability?: number;
+  risk_band: "observe" | "review" | "high_review" | "protocol_lock";
+  risk_model_version?: string;
+  risk_explanation?: Record<string, unknown>;
+  risk_updated_at?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -105,6 +111,17 @@ const examSessionSchema = new Schema<IExamSession>(
     heartbeat_registry_version: { type: String },
     heartbeat_registry_digest: { type: String },
     heartbeat_client_build: { type: String },
+    risk_score: { type: Number, min: 0, max: 100, required: true, default: 0 },
+    risk_probability: { type: Number, min: 0, max: 1 },
+    risk_band: {
+      type: String,
+      enum: ["observe", "review", "high_review", "protocol_lock"],
+      required: true,
+      default: "observe",
+    },
+    risk_model_version: { type: String },
+    risk_explanation: { type: Schema.Types.Mixed },
+    risk_updated_at: { type: Date },
   },
   { timestamps: true }
 );

@@ -12,6 +12,7 @@
     "seed:integration": "tsx scripts/standalone.ts seed-integration",
     "smoke:standalone": "tsx scripts/standalone.ts smoke",
     "test": "tsx --test tests/*.test.ts",
+    "risk:evaluate": "tsx scripts/evaluate-integrity-risk.ts",
     "build": "next build",
     "start": "tsx server.ts start",
     "lint": "eslint"
