@@ -22,6 +22,10 @@ import RadioGroup from "@mui/material/RadioGroup";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import {
+  getDevToolsDimensionSignal,
+  getRestrictedShortcut,
+} from "@/lib/proctoring-signals";
 
 /**
  * The exam-taking screen. Pure MUI: no CSS files, no sx, no styled().
@@ -51,9 +55,9 @@ type Exam = {
   generated_questions?: Question[];
 };
 
-type Props = { examId: string; returnUrl: string };
+type Props = { examId: string; returnUrl: string; devToken?: string };
 
-export default function ExamRunner({ examId, returnUrl }: Props) {
+export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [exam, setExam] = useState<Exam | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -61,36 +65,56 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
   const examRef = useRef<Exam | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/exams/${examId}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not load the exam.");
-      setExam(data);
-      examRef.current = data;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load the exam.");
-    }
-  }, [examId]);
+  const lastReportAtRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    fetch(`/api/exams/${examId}`, {
+      cache: "no-store",
+      headers: devToken ? { "x-univai-dev-token": devToken } : undefined,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not load the exam.");
+        if (active) {
+          setExam(data);
+          examRef.current = data;
+        }
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Could not load the exam.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [examId, devToken]);
 
   /** Report a proctoring event. Never throws: proctoring must not break the exam. */
   const report = useCallback(
-    (type: "tab_switch" | "copy_paste" | "fullscreen_exit", metadata?: object) => {
+    (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
       const current = examRef.current;
       if (!current || current.taken) return;
-      setWarnings((count) => count + 1);
+
+      const now = Date.now();
+      if (now - (lastReportAtRef.current[type] ?? 0) < 1000) return;
+      lastReportAtRef.current[type] = now;
+
       fetch(`/api/exams/${examId}/proctoring-event`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
+        },
         body: JSON.stringify({ type, student_id: current.student_id, metadata }),
-      }).catch(() => undefined);
+      })
+        .then((response) => {
+          if (response.ok) setWarnings((count) => count + 1);
+        })
+        .catch(() => undefined);
     },
-    [examId]
+    [examId, devToken]
   );
 
   useEffect(() => {
@@ -101,16 +125,64 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
     const onFullscreen = () => {
       if (!document.fullscreenElement) report("fullscreen_exit");
     };
+    const onBlur = () => {
+      if (!document.hidden) report("tab_switch", { via: "window_blur" });
+    };
 
     document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("copy", onCopyPaste);
     document.addEventListener("paste", onCopyPaste);
     document.addEventListener("fullscreenchange", onFullscreen);
+    window.addEventListener("blur", onBlur);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("copy", onCopyPaste);
       document.removeEventListener("paste", onCopyPaste);
       document.removeEventListener("fullscreenchange", onFullscreen);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [report]);
+
+  /**
+   * Record developer-tool signals without claiming certainty. Browser JavaScript
+   * cannot reliably prove that DevTools is open, so the dimension heuristic
+   * requires two consecutive samples and reports at most once per exam.
+   */
+  useEffect(() => {
+    let consecutiveDimensionSignals = 0;
+    let dimensionSignalReported = false;
+
+    function sampleDimensions() {
+      const signal = getDevToolsDimensionSignal(window);
+      consecutiveDimensionSignals = signal ? consecutiveDimensionSignals + 1 : 0;
+      if (signal && consecutiveDimensionSignals >= 2 && !dimensionSignalReported) {
+        dimensionSignalReported = true;
+        report("devtools_open", {
+          method: "dimension_heuristic",
+          confidence: "low",
+          ...signal,
+        });
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      const shortcut = getRestrictedShortcut(event);
+      if (!shortcut) return;
+
+      event.preventDefault();
+      report("devtools_open", {
+        method: "restricted_shortcut",
+        confidence: "medium",
+        shortcut,
+      });
+    }
+
+    const intervalId = window.setInterval(sampleDimensions, 3000);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, [report]);
 
@@ -125,7 +197,10 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       }));
       const res = await fetch(`/api/exams/${examId}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(devToken ? { "x-univai-dev-token": devToken } : {}),
+        },
         body: JSON.stringify({ student_answers }),
       });
       const data = await res.json();
@@ -151,7 +226,7 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
   if (!exam) return <CircularProgress />;
 
   // ---------------------------------------------------------------- submitted view
-  // No result is shown HERE: grading and the proctoring verdict live in UnivAI.
+  // No result is shown HERE: grading and the proctoring review live in UnivAI.
   // The exam hall only confirms the hand-in and sends the student back.
   if (exam.taken) {
     return (
@@ -162,8 +237,9 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
             <Stack spacing={2}>
               <Typography variant="h6">Answers submitted</Typography>
               <Alert severity="success">
-                Your answers and the proctoring report were sent to UnivAI. Your grade
-                will appear on your dashboard once it is recorded.
+                Your answers and the proctoring observations were sent to UnivAI for
+                the configured policy and review process. Your grade will appear on
+                your dashboard once it is recorded.
               </Alert>
               <Grid container spacing={2}>
                 <Grid>
@@ -193,8 +269,9 @@ export default function ExamRunner({ examId, returnUrl }: Props) {
       <Typography variant="h4">{exam.title}</Typography>
 
       <Alert severity="warning">
-        You are being proctored: leaving this tab, copy/paste, and exiting fullscreen
-        are recorded{warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
+        You are being proctored: leaving this tab, copy/paste, exiting fullscreen,
+        and developer-tool signals are recorded
+        {warnings ? ` (${warnings} event${warnings === 1 ? "" : "s"} so far)` : ""}.
       </Alert>
 
       <LinearProgress variant="determinate" value={(answered / Math.max(1, questions.length)) * 100} />

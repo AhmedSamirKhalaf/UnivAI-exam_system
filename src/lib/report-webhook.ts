@@ -1,6 +1,8 @@
 import { ExamSession } from "@/models/ExamSession";
 import { ProctoringEvent } from "@/models/ProctoringEvent";
 import type { IExam } from "@/models/Exam";
+import { resultWebhookSchema } from "@/lib/contracts";
+import { isStandalone } from "@/lib/runtime";
 
 /**
  * After a submission, send the result AND the proctoring report back to the
@@ -12,7 +14,7 @@ import type { IExam } from "@/models/Exam";
  */
 export async function sendResultWebhook(exam: IExam): Promise<void> {
   const url = process.env.RESULT_WEBHOOK_URL;
-  if (!url) return;
+  if (!url && !isStandalone()) return;
 
   try {
     const session = await ExamSession.findOne({ exam_id: exam._id });
@@ -23,6 +25,8 @@ export async function sendResultWebhook(exam: IExam): Promise<void> {
       type: exam.type,
       title: exam.title,
       student_id: exam.student_id.toString(),
+      // The UnivAI app's tenant key — routes this grade to the right owner.
+      student_sid: exam.student_sid ?? null,
       chapter_id: exam.chapter_id?.toString() ?? null,
       mark: exam.mark ?? null,
       total_questions: (exam.generated_questions ?? []).length,
@@ -30,6 +34,8 @@ export async function sendResultWebhook(exam: IExam): Promise<void> {
       passed: exam.passed,
       grading_status: exam.grading_status,
       integrity_status: exam.integrity_status,
+      policy_action: exam.policy_action ?? "none",
+      review_status: exam.review_status ?? "not_required",
       report: {
         suspicion_score: session?.suspicion_score ?? 0,
         flagged: session?.flagged ?? false,
@@ -45,10 +51,19 @@ export async function sendResultWebhook(exam: IExam): Promise<void> {
       },
     };
 
+    const validated = resultWebhookSchema.parse(payload);
+    if (!url) {
+      await ExamSession.db.collection("webhook_captures").insertOne({
+        captured_at: new Date(),
+        payload: validated,
+      });
+      return;
+    }
+
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(validated),
     });
   } catch (error) {
     console.error("[webhook] failed to deliver result:", error);

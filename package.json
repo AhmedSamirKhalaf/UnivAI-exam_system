@@ -4,6 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3200",
+    "dev:standalone": "tsx scripts/standalone.ts dev",
+    "standalone:up": "tsx scripts/standalone.ts up",
+    "standalone:seed": "tsx scripts/standalone.ts seed",
+    "standalone:reset": "tsx scripts/standalone.ts reset",
+    "standalone:down": "tsx scripts/standalone.ts down",
+    "seed:integration": "tsx scripts/standalone.ts seed-integration",
+    "smoke:standalone": "tsx scripts/standalone.ts smoke",
+    "test": "tsx --test tests/*.test.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -18,20 +26,27 @@
     "@mui/material-nextjs": "^9.1.1",
     "face-api.js": "^0.22.2",
     "mongoose": "^9.7.4",
-    "next": "16.2.10",
+    "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^20.19.43",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.2.12",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "4.1.10",
     "yaml": "2.9.0"
+  },
+  "overrides": {
+    "node-fetch": "2.7.0",
+    "postcss": "8.5.24",
+    "sharp": "0.35.3"
   }
 }

@@ -5,6 +5,7 @@ import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import Container from "@mui/material/Container";
+import Alert from "@mui/material/Alert";
 
 export const metadata: Metadata = {
   title: "UnivAI Exams",
@@ -27,6 +28,10 @@ export default function RootLayout({
           <Container maxWidth="md">
             {/* Toolbar as a pure-MUI vertical spacer: no CSS files in this app. */}
             <Toolbar variant="dense" />
+            {process.env.UNIVAI_MODE === "standalone" &&
+            process.env.NODE_ENV !== "production" ? (
+              <Alert severity="warning">Standalone development data</Alert>
+            ) : null}
             {children}
             <Toolbar />
           </Container>

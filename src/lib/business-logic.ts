@@ -10,6 +10,12 @@ import { ExamSession } from "@/models/ExamSession";
 import { GradeHistory } from "@/models/GradeHistory";
 import { IntegrityAppeal } from "@/models/IntegrityAppeal";
 import { PROCTORING_CONFIG } from "@/lib/proctoring-config";
+import {
+  createSeededRandom,
+  shuffled,
+  type RandomSource,
+} from "@/lib/deterministic-rng";
+import { isStandalone } from "@/lib/runtime";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -143,6 +149,8 @@ async function bumpSuspicionScore(
     await Exam.findByIdAndUpdate(examId, {
       integrity_status: "invalidated",
       invalidated_at: new Date(),
+      policy_action: "session_invalidated",
+      review_status: "pending",
     });
   }
 
@@ -180,13 +188,8 @@ async function bankQuestions(
   return questions.filter((q) => q.prompt && q.type);
 }
 
-function sample<T>(items: T[], count: number): T[] {
-  const pool = [...items];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, count);
+function sample<T>(items: T[], count: number, random: RandomSource): T[] {
+  return shuffled(items, random).slice(0, count);
 }
 
 function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
@@ -218,6 +221,9 @@ export async function generateQuestions(
   examType: "quiz" | "mid" | "final"
 ): Promise<Record<string, unknown>[]> {
   const chapterIds = Array.isArray(scope) ? scope : [scope];
+  const random = isStandalone()
+    ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
+    : Math.random;
 
   const pool: BankQuestion[] = [];
   if (examType !== "final") {
@@ -239,11 +245,11 @@ export async function generateQuestions(
   const selfCount = Math.min(selfPool.length, Math.floor(count * 0.1));
 
   const picked = [
-    ...sample(taughtPool, count - selfCount),
-    ...sample(selfPool, selfCount),
+    ...sample(taughtPool, count - selfCount, random),
+    ...sample(selfPool, selfCount, random),
   ];
 
-  return sample(picked, picked.length).map((question, index) => ({
+  return sample(picked, picked.length, random).map((question, index) => ({
     question_id: `q_${index + 1}`,
     prompt: question.prompt,
     type: question.type,
@@ -265,7 +271,8 @@ export interface StartResult {
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
   chapterId: string | mongoose.Types.ObjectId,
-  requestedCount?: number
+  requestedCount?: number,
+  studentSid?: string
 ): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
@@ -295,6 +302,7 @@ export async function startQuiz(
 
   if (existing) {
     existing.attempt_number = (existing.attempt_number || 0) + 1;
+    if (studentSid) existing.student_sid = studentSid;
     existing.generated_questions = questions;
     existing.student_answers = [];
     existing.taken = false;
@@ -303,6 +311,8 @@ export async function startQuiz(
     existing.passing_mark = passingMark;
     existing.grading_status = "auto_graded";
     existing.integrity_status = "clean";
+    existing.policy_action = "none";
+    existing.review_status = "not_required";
     existing.invalidated_at = undefined;
     existing.invalidation_notified_at = undefined;
     exam = await existing.save();
@@ -326,6 +336,7 @@ export async function startQuiz(
     type: "quiz",
     title,
     student_id: studentIdObj,
+    student_sid: studentSid,
     chapter_id: chapterIdObj,
     attempt_number: 1,
     generated_questions: questions,
@@ -335,6 +346,8 @@ export async function startQuiz(
     passed: false,
     grading_status: "auto_graded",
     integrity_status: "clean",
+    policy_action: "none",
+    review_status: "not_required",
   });
 
   await ExamSession.create({
@@ -355,12 +368,14 @@ export async function startQuiz(
 
 export async function startMid(
   examId: string | mongoose.Types.ObjectId,
-  requestedCount?: number
+  requestedCount?: number,
+  studentSid?: string
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "mid") throw new Error("Exam is not a mid");
+  if (studentSid) exam.student_sid = studentSid;
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
   const chapterIds = examChapters.map((ec) => ec.chapter_id);
@@ -388,6 +403,8 @@ export async function startMid(
   exam.passed = false;
   exam.grading_status = "auto_graded";
   exam.integrity_status = "clean";
+  exam.policy_action = "none";
+  exam.review_status = "not_required";
   exam.invalidated_at = undefined;
   exam.invalidation_notified_at = undefined;
   await exam.save();
@@ -451,6 +468,8 @@ export async function createMid(
     passing_mark: passingMark,
     grading_status: "auto_graded" as const,
     integrity_status: "clean" as const,
+    policy_action: "none" as const,
+    review_status: "not_required" as const,
   }));
 
   const createdExams = await Exam.insertMany(examDocs);
@@ -515,6 +534,8 @@ export async function startFinal(
     passed: false,
     grading_status: "auto_graded",
     integrity_status: "clean",
+    policy_action: "none",
+    review_status: "not_required",
   });
 
   await ExamSession.create({
@@ -886,13 +907,16 @@ export async function resolveIntegrityAppeal(
 
   if (resolution === "cleared") {
     exam.integrity_status = "clean";
+    exam.policy_action = "none";
+    exam.review_status = "cleared";
     if (exam.type === "quiz" || exam.type === "mid") {
       if (exam.mark !== undefined && exam.passing_mark !== undefined) {
         exam.passed = exam.mark >= exam.passing_mark;
       }
     }
-    await exam.save();
   }
+  if (resolution === "upheld") exam.review_status = "upheld";
+  await exam.save();
 }
 
 /* ------------------------------------------------------------------ */

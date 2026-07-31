@@ -3,10 +3,10 @@ import mongoose from "mongoose";
 /* ────────────────────────────────────────────
    Configuration
    ──────────────────────────────────────────── */
-const BASE = process.env.BASE_URL || "http://localhost:3000";
+// Legacy manual diagnostic. Defaults are deliberately isolated from integrated data.
+const BASE = process.env.BASE_URL || "http://localhost:3200";
 const MONGODB_URI =
-  process.env.MONGODB_URI || "mongodb://localhost:27017/exam_system";
-const SUSPICION_THRESHOLD = 50;
+  process.env.MONGODB_URI || "mongodb://127.0.0.1:27018/univai_exams_standalone";
 
 /* ────────────────────────────────────────────
    Stats

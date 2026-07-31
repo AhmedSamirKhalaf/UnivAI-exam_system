@@ -5,12 +5,14 @@ import {
   stripCorrectOption,
   examToPlain,
 } from "@/lib/business-logic";
+import { assertStandaloneRequest } from "@/lib/runtime";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
+    assertStandaloneRequest(_request);
     await connectDB();
     const { examId } = await params;
 

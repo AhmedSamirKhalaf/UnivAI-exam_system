@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0.0",
+  "schema_source": "Model_Context/schema-design.md (Steps 1-14, final schemas section)",
+  "fixture_description": "Canonical seed state for Sprint 1 E2E black-box acceptance harness. Matches the standalone seed identifiers documented in README.md.",
+  "seeds": {
+    "student": {
+      "_id": "64b000000000000000000001",
+      "sid": "S-2026-000042",
+      "name": "Alice Seeded"
+    },
+    "gate_student": {
+      "_id": "64b000000000000000000009",
+      "name": "Final Gate Learner"
+    },
+    "curriculum": {
+      "_id": "64b000000000000000000003",
+      "title": "Introduction to Computer Science",
+      "description": "Foundational CS curriculum covering algorithms, data structures, and programming concepts."
+    },
+    "chapters": [
+      { "_id": "64b000000000000000000011", "curriculum_id": "64b000000000000000000003", "title": "Algorithms & Complexity", "number": 1 },
+      { "_id": "64b000000000000000000012", "curriculum_id": "64b000000000000000000003", "title": "Data Structures", "number": 2 },
+      { "_id": "64b000000000000000000013", "curriculum_id": "64b000000000000000000003", "title": "Programming Paradigms", "number": 3 },
+      { "_id": "64b000000000000000000014", "curriculum_id": "64b000000000000000000003", "title": "Computer Architecture", "number": 4 }
+    ],
+    "enrollment": {
+      "_id": "64b000000000000000000015",
+      "student_id": "64b000000000000000000001",
+      "curriculum_id": "64b000000000000000000003",
+      "status": "active"
+    },
+    "scenario_exams": {
+      "quiz_not_started":    { "_id": "64b000000000000000000021", "chapter_id": "64b000000000000000000011" },
+      "quiz_active":         { "_id": "64b000000000000000000022", "chapter_id": "64b000000000000000000012" },
+      "quiz_submitted":      { "_id": "64b000000000000000000023", "chapter_id": "64b000000000000000000013" },
+      "final_pending_review":{ "_id": "64b000000000000000000024" },
+      "final_flagged":       { "_id": "64b000000000000000000025" }
+    }
+  },
+  "base_urls": {
+    "api": "http://localhost:3200",
+    "app": "http://localhost:3200"
+  },
+  "upstream_fixture": {
+    "schema_version": "programme-plan-v1",
+    "provider_mode": "recorded_fixture",
+    "source_collection": {
+      "id": "collection-sprint1-001",
+      "student_sid": "S-2026-000042",
+      "documents": [
+        {
+          "id": "doc-algorithms",
+          "filename": "algorithms.pdf",
+          "status": "ready",
+          "source_ids": ["ch1-algorithms", "ch1-complexity"]
+        },
+        {
+          "id": "doc-data-structures",
+          "filename": "data-structures.pdf",
+          "status": "ready",
+          "source_ids": ["ch2-ds", "ch2-data-structures"]
+        },
+        {
+          "id": "doc-programming",
+          "filename": "programming-paradigms.pdf",
+          "status": "ready",
+          "source_ids": ["ch3-programming", "ch3-paradigms"]
+        }
+      ]
+    },
+    "programme": {
+      "id": "programme-sprint1-001",
+      "collection_id": "collection-sprint1-001",
+      "status": "approved",
+      "plan_version": 1,
+      "approved_at": "2026-07-30T00:00:00.000Z",
+      "courses": [
+        {
+          "id": "course-algorithms",
+          "title": "Algorithms and Complexity",
+          "source_document_ids": ["doc-algorithms"]
+        },
+        {
+          "id": "course-data-structures",
+          "title": "Data Structures",
+          "source_document_ids": ["doc-data-structures"]
+        },
+        {
+          "id": "course-programming",
+          "title": "Programming Paradigms",
+          "source_document_ids": ["doc-programming"]
+        }
+      ]
+    },
+    "lecture_qa": {
+      "lecture_id": "lecture-sprint1-001",
+      "course_id": "course-algorithms",
+      "state": "completed",
+      "question": "What is the time complexity of binary search on a sorted array?",
+      "response": {
+        "answer": "Binary search has O(log n) time complexity because each comparison halves the remaining sorted search space.",
+        "refused": false,
+        "sources": [
+          {
+            "document_id": "doc-algorithms",
+            "source_id": "ch1-algorithms",
+            "location": "Chapter 1"
+          }
+        ]
+      }
+    },
+    "exam_handoff": {
+      "student_id": "64b000000000000000000001",
+      "student_sid": "S-2026-000042",
+      "chapter_id": "64b000000000000000000011"
+    }
+  }
+}

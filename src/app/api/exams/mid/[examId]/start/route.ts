@@ -15,7 +15,7 @@ export async function POST(
     const { examId } = await params;
     const body = await request.json().catch(() => ({}));
 
-    const exam = await startMid(examId, body?.question_count);
+    const exam = await startMid(examId, body?.question_count, body?.student_sid);
     const safeExam = stripCorrectOption(examToPlain(exam));
 
     return Response.json(safeExam, { status: 200 });

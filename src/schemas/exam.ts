@@ -22,6 +22,12 @@ export const examSchema = z.object({
   integrity_status: z
     .enum(["clean", "invalidated"])
     .default("clean"),
+  policy_action: z
+    .enum(["none", "session_invalidated"])
+    .default("none"),
+  review_status: z
+    .enum(["not_required", "pending", "cleared", "upheld"])
+    .default("not_required"),
   invalidated_at: z.coerce.date().optional(),
   invalidation_notified_at: z.coerce.date().optional(),
 });

@@ -19,6 +19,8 @@ export type {
   ExamType,
   GradingStatus,
   IntegrityStatus,
+  PolicyAction,
+  ReviewStatus,
 } from "./Exam";
 
 export { ExamChapter } from "./ExamChapter";
@@ -42,3 +44,13 @@ export type {
   IProctoringEvent,
   ProctoringEventType,
 } from "./ProctoringEvent";
+
+export { AssessmentBlueprint } from "./AssessmentBlueprint";
+export type {
+  IAssessmentBlueprint,
+  ISourceCoverage,
+  ISourcePageRange,
+} from "./AssessmentBlueprint";
+
+export { QuestionProvenance } from "./QuestionProvenance";
+export type { IQuestionProvenance, IProvenanceSource } from "./QuestionProvenance";
