@@ -40,7 +40,9 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   },
   "overrides": {
     "node-fetch": "2.7.0",
