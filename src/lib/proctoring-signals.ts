@@ -44,12 +44,13 @@ export function getDevToolsDimensionSignal(
 export function getRestrictedShortcut(event: ShortcutEvent): string | null {
   const key = event.key.toLowerCase();
   if (key === "f12") return "F12";
+  if (key === "printscreen") return "PrintScreen";
 
   const commandOrControl = event.ctrlKey || event.metaKey;
-  if (commandOrControl && event.shiftKey && ["i", "j", "c"].includes(key)) {
+  if (commandOrControl && event.shiftKey && ["i", "j", "c", "k", "z"].includes(key)) {
     return `${event.metaKey ? "Meta" : "Ctrl"}+Shift+${key.toUpperCase()}`;
   }
-  if (event.metaKey && event.altKey && ["i", "j", "c"].includes(key)) {
+  if (event.metaKey && event.altKey && ["i", "j", "c", "u"].includes(key)) {
     return `Meta+Alt+${key.toUpperCase()}`;
   }
   if (commandOrControl && key === "u") {
