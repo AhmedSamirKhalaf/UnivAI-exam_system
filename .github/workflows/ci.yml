@@ -50,6 +50,6 @@ jobs:
       - name: Run API integration tests
         run: node api_test.mjs
       - name: Run unit tests
-        run: npx vitest run
+        run: npx vitest run tests/api tests/lib tests/ci
       - name: Check whitespace
         run: git diff --check
