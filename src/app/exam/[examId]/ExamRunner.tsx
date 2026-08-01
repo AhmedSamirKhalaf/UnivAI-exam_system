@@ -69,9 +69,12 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
     fetch(`/api/exams/${examId}`, {
       cache: "no-store",
       headers: devToken ? { "x-univai-dev-token": devToken } : undefined,
+      signal: controller.signal,
     })
       .then(async (response) => {
         const data = await response.json();
@@ -83,11 +86,15 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       })
       .catch((err: unknown) => {
         if (active) {
-          setError(err instanceof Error ? err.message : "Could not load the exam.");
+          setError(err instanceof DOMException && err.name === "AbortError"
+            ? "The exam request timed out. Check the server connection and refresh."
+            : err instanceof Error ? err.message : "Could not load the exam.");
         }
       });
     return () => {
       active = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
     };
   }, [examId, devToken]);
 
