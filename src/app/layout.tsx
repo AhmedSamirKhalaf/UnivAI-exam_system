@@ -6,6 +6,9 @@ import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import Container from "@mui/material/Container";
 import Alert from "@mui/material/Alert";
+import Stack from "@mui/material/Stack";
+import SchoolRounded from "@mui/icons-material/SchoolRounded";
+import ExamThemeProvider from "./ExamThemeProvider";
 
 export const metadata: Metadata = {
   title: "UnivAI Exams",
@@ -19,22 +22,28 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AppRouterCacheProvider>
-          <CssBaseline />
-          <AppBar position="static" color="secondary">
-            <Toolbar>
-              <Typography variant="h6">UnivAI Exams</Typography>
-            </Toolbar>
-          </AppBar>
-          <Container maxWidth="md">
-            {/* Toolbar as a pure-MUI vertical spacer: no CSS files in this app. */}
-            <Toolbar variant="dense" />
-            {process.env.UNIVAI_MODE === "standalone" &&
-            process.env.NODE_ENV !== "production" ? (
-              <Alert severity="warning">Standalone development data</Alert>
-            ) : null}
-            {children}
-            <Toolbar />
-          </Container>
+          <ExamThemeProvider>
+            <CssBaseline />
+            <AppBar position="sticky" color="inherit">
+              <Toolbar>
+                <Stack direction="row" spacing={1.5}>
+                  <SchoolRounded color="primary" />
+                  <Typography variant="h6">UnivAI Exams</Typography>
+                </Stack>
+              </Toolbar>
+            </AppBar>
+            <Container component="main" maxWidth="lg">
+              <Stack spacing={3}>
+                <Toolbar variant="dense" />
+                {process.env.UNIVAI_MODE === "standalone" &&
+                process.env.NODE_ENV !== "production" ? (
+                  <Alert severity="warning">Standalone development data</Alert>
+                ) : null}
+                {children}
+                <Toolbar />
+              </Stack>
+            </Container>
+          </ExamThemeProvider>
         </AppRouterCacheProvider>
       </body>
     </html>

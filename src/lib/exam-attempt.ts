@@ -18,6 +18,7 @@ export type ExamAttemptView = {
   title: string;
   taken: boolean;
   integrity_status: "clean" | "invalidated";
+  started_at?: string;
   current_question: PublicQuestion | null;
   progress: {
     position: number;
@@ -28,6 +29,14 @@ export type ExamAttemptView = {
   can_submit: boolean;
   integrity_state: "active" | "reconnecting" | "grace" | "integrity_locked" | "submitted";
   lock_reason?: string;
+  result?: {
+    grading_status: "auto_graded" | "pending_review" | "graded";
+    mark?: number;
+    passing_mark?: number;
+    passed: boolean;
+    integrity_status: "clean" | "invalidated";
+    review_status: "not_required" | "pending" | "cleared" | "upheld";
+  };
 };
 
 export class ExamAttemptError extends Error {
@@ -128,7 +137,17 @@ function publicQuestion(value: Record<string, unknown>): PublicQuestion {
 export function buildExamAttemptView(
   exam: Pick<
     IExam,
-    "_id" | "type" | "title" | "taken" | "integrity_status" | "generated_questions"
+    | "_id"
+    | "type"
+    | "title"
+    | "taken"
+    | "integrity_status"
+    | "generated_questions"
+    | "grading_status"
+    | "mark"
+    | "passing_mark"
+    | "passed"
+    | "review_status"
   >,
   session: Pick<
     IExamSession,
@@ -138,6 +157,7 @@ export function buildExamAttemptView(
     | "status"
     | "integrity_state"
     | "integrity_lock_reason"
+    | "started_at"
   > | null,
 ): ExamAttemptView {
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
@@ -157,6 +177,7 @@ export function buildExamAttemptView(
     title: exam.title,
     taken: exam.taken,
     integrity_status: exam.integrity_status,
+    ...(session?.started_at ? { started_at: session.started_at.toISOString() } : {}),
     current_question: active && index < questions.length
       ? publicQuestion(questions[index])
       : null,
@@ -170,6 +191,18 @@ export function buildExamAttemptView(
     integrity_state: integrityState,
     ...(session?.integrity_lock_reason
       ? { lock_reason: session.integrity_lock_reason }
+      : {}),
+    ...(exam.taken
+      ? {
+          result: {
+            grading_status: exam.grading_status,
+            ...(exam.mark !== undefined ? { mark: exam.mark } : {}),
+            ...(exam.passing_mark !== undefined ? { passing_mark: exam.passing_mark } : {}),
+            passed: exam.passed,
+            integrity_status: exam.integrity_status,
+            review_status: exam.review_status,
+          },
+        }
       : {}),
   };
 }
