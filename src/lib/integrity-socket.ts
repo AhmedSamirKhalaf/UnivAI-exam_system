@@ -18,6 +18,7 @@ import {
 } from "@/lib/heartbeat-policy";
 import { IntegrityEvent } from "@/models/IntegrityEvent";
 import { ExamSession, type IExamSession, type TerminatedReason } from "@/models/ExamSession";
+import { scheduleIntegrityRiskRefresh } from "@/lib/integrity-risk-service";
 
 type ConnectionState = {
   authenticated: boolean;
@@ -27,6 +28,7 @@ type ConnectionState = {
   session: IExamSession | null;
   lastSequence: number;
   lastHeartbeatSequence: number;
+  serverSequence: number;
   messageCount: number;
   windowStartedAt: number;
   pendingChallenge: HeartbeatChallenge | null;
@@ -148,11 +150,48 @@ async function recordEvent(
       { _id: state.session._id, active_connection_id: state.connectionId },
       { $max: { last_integrity_sequence: event.sequence } },
     );
+    scheduleIntegrityRiskRefresh(state.session.exam_id);
     return false;
   } catch (error: unknown) {
     if (isDuplicateKey(error)) return true;
     throw error;
   }
+}
+
+async function recordServerEvent(
+  state: ConnectionState,
+  eventType: Extract<
+    IntegrityEventType,
+    "channel_open" | "channel_close" | "heartbeat_ok" | "heartbeat_missed" | "heartbeat_invalid" | "telemetry_gap"
+  >,
+  details: Record<string, string | number | boolean | null> = {},
+): Promise<void> {
+  if (!state.session) return;
+  state.serverSequence += 1;
+  await IntegrityEvent.create({
+    exam_id: state.session.exam_id,
+    student_id: state.session.student_id,
+    connection_id: `${state.connectionId}:server`,
+    event_id: randomUUID(),
+    sequence: state.serverSequence,
+    event_type: eventType,
+    evidence_value: evidenceValueFor(eventType),
+    occurred_at: new Date(),
+    received_at: new Date(),
+    client_build: "exam-server",
+    details,
+  });
+  scheduleIntegrityRiskRefresh(state.session.exam_id);
+}
+
+function heartbeatFailureCode(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("signature")) return "invalid_signature";
+  if (message.includes("expired")) return "expired_challenge";
+  if (message.includes("replayed") || message.includes("replaced")) return "replayed_or_replaced";
+  if (message.includes("sequence")) return "non_increasing_sequence";
+  if (message.includes("another session")) return "session_mismatch";
+  return "invalid_challenge";
 }
 
 function issueChallenge(state: ConnectionState, socket: WebSocket): void {
@@ -174,6 +213,9 @@ async function heartbeatTick(state: ConnectionState, socket: WebSocket): Promise
     const now = Date.now();
     if (state.pendingChallenge) {
       state.consecutiveMisses += 1;
+      await recordServerEvent(state, "heartbeat_missed", {
+        consecutive_misses: state.consecutiveMisses,
+      });
       if (state.consecutiveMisses === 1) {
         state.graceUntil = now + policy.graceMs;
         await updateSessionState(state, "reconnecting", {
@@ -235,6 +277,7 @@ export function attachIntegrityWebSocketServer(
       session: null,
       lastSequence: 0,
       lastHeartbeatSequence: 0,
+      serverSequence: 0,
       messageCount: 0,
       windowStartedAt: Date.now(),
       pendingChallenge: null,
@@ -285,6 +328,9 @@ export function attachIntegrityWebSocketServer(
             heartbeat_client_build: state.clientBuild,
             integrity_lock_reason: null,
           });
+          await recordServerEvent(state, "channel_open", {
+            reconnecting: session.active_connection_id !== undefined,
+          });
           send(socket, { version: 1, type: "authenticated", connection_id: state.connectionId });
           issueChallenge(state, socket);
           state.heartbeatTimer = setInterval(
@@ -309,33 +355,53 @@ export function attachIntegrityWebSocketServer(
             if (message.heartbeat_sequence <= state.lastHeartbeatSequence) {
               throw new Error("Heartbeat sequence is not increasing");
             }
-            state.pendingChallenge = null;
-            state.lastHeartbeatSequence = message.heartbeat_sequence;
-            state.consecutiveMisses = 0;
-            state.graceUntil = null;
-            await updateSessionState(state, "active", {
-              heartbeat_last_seen_at: new Date(),
-              heartbeat_consecutive_misses: 0,
-              heartbeat_grace_until: null,
-              heartbeat_registry_version: message.registry_version,
-              heartbeat_registry_digest: message.registry_digest,
-              heartbeat_client_build: message.client_build,
-              last_integrity_sequence: message.last_event_sequence,
-            });
-            send(socket, {
-              version: 1,
-              type: "heartbeat_ack",
-              heartbeat_sequence: message.heartbeat_sequence,
-              state: "active",
-            });
           } catch (error: unknown) {
+            await recordServerEvent(state, "heartbeat_invalid", {
+              reason_code: heartbeatFailureCode(error),
+            }).catch((auditError: unknown) => {
+              console.error(
+                "Invalid heartbeat audit failed",
+                auditError instanceof Error ? auditError.message : auditError,
+              );
+            });
             await lockSession(
               state,
               socket,
               error instanceof Error ? error.message : "Heartbeat validation failed",
               "protocol_failure",
             );
+            return;
           }
+          if (message.last_event_sequence !== state.lastSequence) {
+            await recordServerEvent(state, "telemetry_gap", {
+              client_sequence: message.last_event_sequence,
+              server_sequence: state.lastSequence,
+            });
+          }
+          state.pendingChallenge = null;
+          state.lastHeartbeatSequence = message.heartbeat_sequence;
+          state.consecutiveMisses = 0;
+          state.graceUntil = null;
+          await updateSessionState(state, "active", {
+            heartbeat_last_seen_at: new Date(),
+            heartbeat_consecutive_misses: 0,
+            heartbeat_grace_until: null,
+            heartbeat_registry_version: message.registry_version,
+            heartbeat_registry_digest: message.registry_digest,
+            heartbeat_client_build: message.client_build,
+            last_integrity_sequence: message.last_event_sequence,
+          });
+          await recordServerEvent(state, "heartbeat_ok", {
+            heartbeat_sequence: message.heartbeat_sequence,
+            event_sequence: message.last_event_sequence,
+            registry_version: message.registry_version,
+          });
+          send(socket, {
+            version: 1,
+            type: "heartbeat_ack",
+            heartbeat_sequence: message.heartbeat_sequence,
+            state: "active",
+          });
           return;
         }
 
@@ -362,12 +428,19 @@ export function attachIntegrityWebSocketServer(
       }
     });
 
-    socket.on("close", () => {
+    socket.on("close", (code) => {
       clearTimeout(authenticationTimeout);
       if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
       const active = activeConnections.get(state.examId);
       if (active?.state.connectionId === state.connectionId) activeConnections.delete(state.examId);
-      if (!state.authenticated || !state.session || state.locked) return;
+      if (!state.authenticated || !state.session) return;
+      void recordServerEvent(state, "channel_close", {
+        close_code: code,
+        expected_close: code === 1000 || code === 1001,
+      }).catch((error: unknown) => {
+        console.error("Integrity channel close audit failed", error instanceof Error ? error.message : error);
+      });
+      if (state.locked) return;
 
       const policy = heartbeatPolicy();
       const graceUntil = new Date(Date.now() + policy.graceMs);

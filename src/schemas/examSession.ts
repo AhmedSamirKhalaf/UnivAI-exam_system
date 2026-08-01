@@ -37,6 +37,12 @@ export const examSessionSchema = z.object({
   heartbeat_registry_version: z.string().max(120).optional(),
   heartbeat_registry_digest: z.string().max(128).optional(),
   heartbeat_client_build: z.string().max(120).optional(),
+  risk_score: z.number().min(0).max(100).default(0),
+  risk_probability: z.number().min(0).max(1).optional(),
+  risk_band: z.enum(["observe", "review", "high_review", "protocol_lock"]).default("observe"),
+  risk_model_version: z.string().max(120).optional(),
+  risk_explanation: z.record(z.string(), z.unknown()).optional(),
+  risk_updated_at: z.coerce.date().optional(),
 });
 
 export type ExamSessionInput = z.infer<typeof examSessionSchema>;

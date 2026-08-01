@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const integrityEventTypes = [
+export const clientIntegrityEventTypes = [
   "visibility_hidden",
   "visibility_visible",
   "window_blur",
@@ -33,7 +33,22 @@ export const integrityEventTypes = [
   "listener_registry_restored",
 ] as const;
 
+export const serverIntegrityEventTypes = [
+  "channel_open",
+  "channel_close",
+  "heartbeat_ok",
+  "heartbeat_missed",
+  "heartbeat_invalid",
+  "telemetry_gap",
+] as const;
+
+export const integrityEventTypes = [
+  ...clientIntegrityEventTypes,
+  ...serverIntegrityEventTypes,
+] as const;
+
 export const integrityEventTypeSchema = z.enum(integrityEventTypes);
+export const clientIntegrityEventTypeSchema = z.enum(clientIntegrityEventTypes);
 export type IntegrityEventType = z.infer<typeof integrityEventTypeSchema>;
 
 const detailsSchema = z
@@ -70,7 +85,7 @@ export const integrityEventMessageSchema = z
     event_id: z.string().uuid(),
     sequence: z.number().int().positive(),
     occurred_at: z.string().datetime({ offset: true }),
-    event_type: integrityEventTypeSchema,
+    event_type: clientIntegrityEventTypeSchema,
     details: detailsSchema.default({}),
   })
   .strict();
@@ -99,7 +114,7 @@ export const integrityClientMessageSchema = z.discriminatedUnion("type", [
 
 export type IntegrityClientMessage = z.infer<typeof integrityClientMessageSchema>;
 
-const evidenceValues: Record<IntegrityEventType, 0 | 1 | 2 | 3> = {
+const evidenceValues: Record<IntegrityEventType, 0 | 1 | 2 | 3 | 4> = {
   visibility_hidden: 2,
   visibility_visible: 0,
   window_blur: 1,
@@ -130,9 +145,15 @@ const evidenceValues: Record<IntegrityEventType, 0 | 1 | 2 | 3> = {
   csp_violation: 3,
   media_device_changed: 1,
   listener_registry_restored: 2,
+  channel_open: 0,
+  channel_close: 1,
+  heartbeat_ok: 0,
+  heartbeat_missed: 2,
+  heartbeat_invalid: 4,
+  telemetry_gap: 2,
 };
 
-export function evidenceValueFor(type: IntegrityEventType): 0 | 1 | 2 | 3 {
+export function evidenceValueFor(type: IntegrityEventType): 0 | 1 | 2 | 3 | 4 {
   return evidenceValues[type];
 }
 
