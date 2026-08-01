@@ -22,13 +22,9 @@ import RadioGroup from "@mui/material/RadioGroup";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import {
-  getDevToolsDimensionSignal,
-  getRestrictedShortcut,
-} from "@/lib/proctoring-signals";
 import { useExamIntegrityChannel } from "@/lib/use-exam-integrity-channel";
-import type { IntegrityEventType } from "@/lib/integrity-protocol";
 import { ExamListenerRegistry } from "@/lib/exam-listener-registry";
+import { useExamDeterrents } from "@/lib/use-exam-deterrents";
 
 type Question = {
   question_id: string;
@@ -61,11 +57,10 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [warnings, setWarnings] = useState(0);
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
-  const examRef = useRef<ExamAttempt | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const listenerRegistryRef = useRef<ExamListenerRegistry | null>(null);
-  const lastReportAtRef = useRef<Record<string, number>>({});
 
   const requestHeaders = useCallback(
     (json = false, token = accessTokenRef.current): HeadersInit => ({
@@ -97,7 +92,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
         if (!response.ok) throw new Error(data.error ?? "Could not load the exam.");
         if (active) {
           setExam(data);
-          examRef.current = data;
         }
       })
       .catch((err: unknown) => {
@@ -123,89 +117,17 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     devToken,
   });
 
-  const report = useCallback(
-    (type: "tab_switch" | "copy_paste" | "fullscreen_exit" | "devtools_open", metadata?: object) => {
-      const current = examRef.current;
-      if (!current || current.taken) return;
-      const now = Date.now();
-      if (now - (lastReportAtRef.current[type] ?? 0) < 1000) return;
-      lastReportAtRef.current[type] = now;
+  const onBlockedAction = useCallback((message: string) => {
+    setWarnings((count) => count + 1);
+    setBlockedMessage(message);
+  }, []);
 
-      let eventType: IntegrityEventType;
-      if (type === "tab_switch") {
-        eventType = metadata && "via" in metadata ? "window_blur" : "visibility_hidden";
-      } else if (type === "copy_paste") {
-        const kind = metadata && "kind" in metadata ? String(metadata.kind) : "copy";
-        eventType = kind === "paste" ? "clipboard_paste_attempt" : "clipboard_copy_attempt";
-      } else if (type === "fullscreen_exit") {
-        eventType = "fullscreen_exit";
-      } else {
-        const method = metadata && "method" in metadata ? String(metadata.method) : "";
-        eventType = method === "dimension_heuristic"
-          ? "devtools_dimension_suspected"
-          : "restricted_shortcut";
-      }
-      const safeMetadata = Object.fromEntries(
-        Object.entries(metadata ?? {}).flatMap(([key, value]) =>
-          ["string", "number", "boolean"].includes(typeof value)
-            ? [[key, value as string | number | boolean]]
-            : [],
-        ),
-      );
-      sendEvent(eventType, safeMetadata);
-      setWarnings((count) => count + 1);
-    },
-    [sendEvent],
-  );
-
-  useEffect(() => {
-    const onVisibility = () => document.hidden && report("tab_switch");
-    const onCopyPaste = (event: ClipboardEvent) => report("copy_paste", { kind: event.type });
-    const onFullscreen = () => !document.fullscreenElement && report("fullscreen_exit");
-    const onBlur = () => !document.hidden && report("tab_switch", { via: "window_blur" });
-
-    const registry = new ExamListenerRegistry("exam-listeners-v1");
-    listenerRegistryRef.current = registry;
-    registry.register({ name: "visibility", target: document, type: "visibilitychange", handler: onVisibility });
-    registry.register({ name: "copy", target: document, type: "copy", handler: onCopyPaste as EventListener });
-    registry.register({ name: "paste", target: document, type: "paste", handler: onCopyPaste as EventListener });
-    registry.register({ name: "fullscreen", target: document, type: "fullscreenchange", handler: onFullscreen });
-    registry.register({ name: "blur", target: window, type: "blur", handler: onBlur });
-    return () => {
-      registry.dispose();
-      if (listenerRegistryRef.current === registry) listenerRegistryRef.current = null;
-    };
-  }, [report]);
-
-  useEffect(() => {
-    let consecutiveDimensionSignals = 0;
-    let dimensionSignalReported = false;
-    const sampleDimensions = () => {
-      const signal = getDevToolsDimensionSignal(window);
-      consecutiveDimensionSignals = signal ? consecutiveDimensionSignals + 1 : 0;
-      if (signal && consecutiveDimensionSignals >= 2 && !dimensionSignalReported) {
-        dimensionSignalReported = true;
-        report("devtools_open", { method: "dimension_heuristic", confidence: "low", ...signal });
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      const shortcut = getRestrictedShortcut(event);
-      if (!shortcut) return;
-      event.preventDefault();
-      report("devtools_open", { method: "restricted_shortcut", confidence: "medium", shortcut });
-    };
-    const intervalId = window.setInterval(sampleDimensions, 3000);
-    listenerRegistryRef.current?.register({
-      name: "restricted-shortcuts",
-      target: document,
-      type: "keydown",
-      handler: onKeyDown as EventListener,
-      options: { capture: true },
-    });
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [report]);
+  useExamDeterrents({
+    enabled: Boolean(exam && !exam.taken && channelStatus !== "locked"),
+    registryRef: listenerRegistryRef,
+    sendEvent,
+    onBlockedAction,
+  });
 
   async function saveAndContinue(action: "answer" | "skip") {
     const current = exam?.current_question;
@@ -228,7 +150,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not save the answer.");
       setExam(data);
-      examRef.current = data;
       setAnswer("");
       setSavedMessage(action === "skip" ? "Question skipped and saved." : "Answer saved.");
     } catch (caught: unknown) {
@@ -250,7 +171,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Submission failed.");
       setExam(data);
-      examRef.current = data;
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "Submission failed.");
     } finally {
@@ -287,6 +207,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
         Exam activity is monitored. Integrity channel: {channelStatus}. Common copy, tab, fullscreen, and developer-tool actions are recorded
         {warnings ? ` (${warnings} notice${warnings === 1 ? "" : "s"})` : ""}.
       </Alert>
+      {blockedMessage ? <Alert severity="warning" role="alert">{blockedMessage}</Alert> : null}
       <LinearProgress variant="determinate" value={progressValue} />
       <Typography variant="body2" color="text.secondary">
         {exam.progress.answered} of {exam.progress.total} completed
