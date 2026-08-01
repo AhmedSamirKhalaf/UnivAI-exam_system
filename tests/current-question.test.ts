@@ -28,6 +28,11 @@ const exam = {
       correct_option: "hidden",
     },
   ],
+  grading_status: "auto_graded" as const,
+  mark: undefined,
+  passing_mark: 1,
+  passed: false,
+  review_status: "not_required" as const,
 };
 
 test("attempt view exposes only the current public question", () => {
@@ -45,6 +50,20 @@ test("attempt view exposes only the current public question", () => {
   assert.equal(JSON.stringify(view).includes("correct_option"), false);
   assert.equal(JSON.stringify(view).includes("provenance"), false);
   assert.deepEqual(view.progress, { position: 1, total: 2, answered: 0 });
+  assert.equal(view.result, undefined);
+});
+
+test("result metadata appears only after submission", () => {
+  const view = buildExamAttemptView({ ...exam, taken: true, mark: 2, passed: true }, null);
+  assert.deepEqual(view.result, {
+    grading_status: "auto_graded",
+    mark: 2,
+    passing_mark: 1,
+    passed: true,
+    integrity_status: "clean",
+    review_status: "not_required",
+  });
+  assert.equal(view.current_question, null);
 });
 
 test("attempt view advances by server session state", () => {
