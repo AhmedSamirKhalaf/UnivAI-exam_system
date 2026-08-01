@@ -134,9 +134,11 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [readinessStep, setReadinessStep] = useState(0);
   const [readinessMessage, setReadinessMessage] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const [fullscreenPaused, setFullscreenPaused] = useState(false);
   const accessTokenRef = useRef<string | null>(null);
   const listenerRegistryRef = useRef<ExamListenerRegistry | null>(null);
   const restoreRequestedRef = useRef(false);
+  const fullscreenPausedRef = useRef(false);
 
   const requestHeaders = useCallback(
     (json = false, token = accessTokenRef.current): HeadersInit => ({
@@ -228,21 +230,41 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     setBlockedMessage(message);
   }, []);
 
+  const onFullscreenChange = useCallback((active: boolean) => {
+    if (active) {
+      fullscreenPausedRef.current = false;
+      setFullscreenPaused(false);
+      setReadinessMessage(null);
+      setBlockedMessage(null);
+      return;
+    }
+    if (!fullscreenPausedRef.current) {
+      onBlockedAction("Fullscreen is required. The exam is paused until you return to fullscreen.");
+    }
+    fullscreenPausedRef.current = true;
+    setFullscreenPaused(true);
+    setConfirmOpen(false);
+  }, [onBlockedAction]);
+
   useExamDeterrents({
     enabled: Boolean(started && exam && !exam.taken && channelStatus !== "locked"),
     registryRef: listenerRegistryRef,
     sendEvent,
     onBlockedAction,
+    onFullscreenChange,
   });
 
   async function beginExam() {
     setReadinessMessage(null);
     try {
-      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else if (!document.documentElement.requestFullscreen) {
-        setReadinessMessage("Fullscreen is not available in this browser. The exam can continue, and the limitation is shown clearly.");
+      if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) {
+        setReadinessMessage("Fullscreen is required to take this exam. Use a browser that supports fullscreen.");
+        return;
       }
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!document.fullscreenElement) throw new Error("Fullscreen did not activate.");
+      fullscreenPausedRef.current = false;
+      setFullscreenPaused(false);
       setReadinessStep(2);
       setStarted(true);
     } catch {
@@ -250,9 +272,34 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     }
   }
 
+  async function returnToFullscreen() {
+    setReadinessMessage(null);
+    try {
+      if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) {
+        throw new Error("Fullscreen is unavailable.");
+      }
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!document.fullscreenElement) throw new Error("Fullscreen did not activate.");
+      fullscreenPausedRef.current = false;
+      setFullscreenPaused(false);
+      setBlockedMessage(null);
+    } catch {
+      setReadinessMessage("The exam remains paused. Allow fullscreen, then try again.");
+    }
+  }
+
   async function saveAndContinue(action: "answer" | "skip") {
     const current = exam?.current_question;
-    if (!exam || !current || channelStatus !== "connected") return;
+    if (
+      !exam ||
+      !current ||
+      channelStatus !== "connected" ||
+      fullscreenPausedRef.current ||
+      !document.fullscreenElement
+    ) {
+      if (started && !document.fullscreenElement) onFullscreenChange(false);
+      return;
+    }
     setSaving(true);
     setError(null);
     setSavedMessage(null);
@@ -281,7 +328,15 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   }
 
   async function submit() {
-    if (!exam?.can_submit || channelStatus !== "connected") return;
+    if (
+      !exam?.can_submit ||
+      channelStatus !== "connected" ||
+      fullscreenPausedRef.current ||
+      !document.fullscreenElement
+    ) {
+      if (started && !document.fullscreenElement) onFullscreenChange(false);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -402,6 +457,30 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     );
   }
 
+  if (started && fullscreenPaused && !exam.taken) {
+    return (
+      <Card variant="outlined">
+        <CardContent>
+          <Stack spacing={3}>
+            <LockOutlined color="error" fontSize="large" />
+            <Typography variant="h4">Exam paused — fullscreen required</Typography>
+            <Alert severity="error" role="alert">
+              <AlertTitle>You left fullscreen</AlertTitle>
+              Questions and answer controls are blocked. Return to fullscreen to continue this attempt.
+            </Alert>
+            {readinessMessage ? <Alert severity="warning" role="alert">{readinessMessage}</Alert> : null}
+            <Typography color="text.secondary">
+              Answers already accepted by the server are preserved. Closing this message or pressing Escape cannot resume the exam.
+            </Typography>
+            <Button variant="contained" size="large" startIcon={<FullscreenRounded />} onClick={() => void returnToFullscreen()}>
+              Return to fullscreen
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!started) {
     return (
       <Fade in timeout={225}>
@@ -435,7 +514,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                   <List aria-label="Exam rules">
                     <ListItem disableGutters>
                       <ListItemIcon><CheckCircleOutlineRounded color="primary" /></ListItemIcon>
-                      <ListItemText primary="Stay in this exam window" secondary="Leaving the tab or fullscreen is recorded with its context." />
+                      <ListItemText primary="Stay in this exam window" secondary="Leaving fullscreen immediately pauses and blocks the exam until fullscreen is restored." />
                     </ListItem>
                     <ListItem disableGutters>
                       <ListItemIcon><CheckCircleOutlineRounded color="primary" /></ListItemIcon>

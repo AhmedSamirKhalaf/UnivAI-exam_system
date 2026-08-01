@@ -38,3 +38,12 @@ test("deterrent implementation has no debugger trap or sensitive payload collect
   assert.equal(source.includes("event.key,"), false);
   assert.equal(source.includes("innerHTML"), false);
 });
+
+test("fullscreen changes are reported to the hard exam gate", async () => {
+  const source = await readFile(
+    new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /onFullscreenChange\(active\)/);
+  assert.match(source, /active \? "fullscreen_enter" : "fullscreen_exit"/);
+});

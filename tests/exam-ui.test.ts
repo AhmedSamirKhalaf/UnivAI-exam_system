@@ -32,3 +32,12 @@ test("guided exam road includes accessible status and confirmation states", () =
   assert.match(runner, /Request review or appeal/);
   assert.doesNotMatch(runner, /generated_questions|correct_option/);
 });
+
+test("leaving fullscreen hard-pauses every exam action", () => {
+  assert.match(runner, /Exam paused — fullscreen required/);
+  assert.match(runner, /Return to fullscreen/);
+  assert.match(runner, /fullscreenPausedRef\.current/);
+  assert.match(runner, /!document\.fullscreenElement/);
+  assert.match(runner, /onFullscreenChange\(false\)/);
+  assert.doesNotMatch(runner, /The exam can continue/);
+});

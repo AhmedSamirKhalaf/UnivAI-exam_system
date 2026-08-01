@@ -18,6 +18,7 @@ type Options = {
   registryRef: RefObject<ExamListenerRegistry | null>;
   sendEvent: SendEvent;
   onBlockedAction: (message: string) => void;
+  onFullscreenChange: (active: boolean) => void;
 };
 
 function roundedGap(value: number): number {
@@ -40,6 +41,7 @@ export function useExamDeterrents({
   registryRef,
   sendEvent,
   onBlockedAction,
+  onFullscreenChange,
 }: Options): void {
   useEffect(() => {
     if (!enabled) return;
@@ -95,9 +97,11 @@ export function useExamDeterrents({
       blurredAt = null;
     });
     register("fullscreen-change", document, "fullscreenchange", () => {
-      sendEvent(document.fullscreenElement ? "fullscreen_enter" : "fullscreen_exit", {
-        active: Boolean(document.fullscreenElement),
+      const active = Boolean(document.fullscreenElement);
+      sendEvent(active ? "fullscreen_enter" : "fullscreen_exit", {
+        active,
       });
+      onFullscreenChange(active);
     });
     register("fullscreen-error", document, "fullscreenerror", () => {
       sendEvent("fullscreen_error", { supported: Boolean(document.fullscreenEnabled) });
@@ -230,5 +234,5 @@ export function useExamDeterrents({
       channel?.close();
       if (registryRef.current === registry) registryRef.current = null;
     };
-  }, [enabled, onBlockedAction, registryRef, sendEvent]);
+  }, [enabled, onBlockedAction, onFullscreenChange, registryRef, sendEvent]);
 }
