@@ -17,6 +17,14 @@ export interface IExamSession extends Document {
   flagged: boolean;
   status: SessionStatus;
   terminated_reason?: TerminatedReason;
+  current_question_index: number;
+  answer_revision: number;
+  answers: Record<string, unknown>[];
+  access_token_hash?: string;
+  access_token_issued_at?: Date;
+  last_action_id?: string;
+  last_action_question_id?: string;
+  last_action_revision?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +60,14 @@ const examSessionSchema = new Schema<IExamSession>(
         "timeout",
       ],
     },
+    current_question_index: { type: Number, required: true, default: 0 },
+    answer_revision: { type: Number, required: true, default: 0 },
+    answers: { type: Schema.Types.Mixed, required: true, default: [] },
+    access_token_hash: { type: String, select: false },
+    access_token_issued_at: { type: Date },
+    last_action_id: { type: String },
+    last_action_question_id: { type: String },
+    last_action_revision: { type: Number },
   },
   { timestamps: true }
 );

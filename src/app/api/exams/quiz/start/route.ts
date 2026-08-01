@@ -3,9 +3,8 @@ import { connectDB } from "@/lib/db";
 import {
   canStartExam,
   startQuiz,
-  stripCorrectOption,
-  examToPlain,
 } from "@/lib/business-logic";
+import { createExamLaunch, examAttemptErrorResponse } from "@/lib/exam-attempt";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,13 +25,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { exam, created } = await startQuiz(student_id, chapter_id, question_count, student_sid);
-    const safeExam = stripCorrectOption(examToPlain(exam));
-
-    return Response.json(safeExam, { status: created ? 201 : 200 });
+    const launch = await createExamLaunch(exam, request.nextUrl.origin);
+    return Response.json(launch, { status: created ? 201 : 200 });
   } catch (error: unknown) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return examAttemptErrorResponse(error);
   }
 }
