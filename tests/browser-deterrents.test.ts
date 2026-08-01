@@ -47,3 +47,21 @@ test("fullscreen changes are reported to the hard exam gate", async () => {
   assert.match(source, /onFullscreenChange\(active\)/);
   assert.match(source, /active \? "fullscreen_enter" : "fullscreen_exit"/);
 });
+
+test("pre-opened developer tools trigger a reversible hard gate", async () => {
+  const deterrents = await readFile(
+    new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
+    "utf8",
+  );
+  const runner = await readFile(
+    new URL("../src/app/exam/[examId]/ExamRunner.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(deterrents, /inspectDimensions\(\);/);
+  assert.match(deterrents, /consecutiveDimensionSignals >= 2/);
+  assert.match(deterrents, /consecutiveCleanDimensionSignals >= 2/);
+  assert.match(deterrents, /onDevToolsChange\(true\)/);
+  assert.match(deterrents, /onDevToolsChange\(false\)/);
+  assert.match(runner, /Exam paused — close developer tools/);
+  assert.match(runner, /devToolsPausedRef\.current/);
+});

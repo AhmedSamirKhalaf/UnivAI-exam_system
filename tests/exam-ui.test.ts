@@ -41,3 +41,9 @@ test("leaving fullscreen hard-pauses every exam action", () => {
   assert.match(runner, /onFullscreenChange\(false\)/);
   assert.doesNotMatch(runner, /The exam can continue/);
 });
+
+test("a repeated developer-tools dimension signal hard-pauses every exam action", () => {
+  assert.match(runner, /Exam paused — close developer tools/);
+  assert.match(runner, /devToolsPausedRef\.current/);
+  assert.match(runner, /disabled=\{devToolsPaused\}/);
+});

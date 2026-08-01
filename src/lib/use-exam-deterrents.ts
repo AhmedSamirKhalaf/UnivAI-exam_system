@@ -19,6 +19,7 @@ type Options = {
   sendEvent: SendEvent;
   onBlockedAction: (message: string) => void;
   onFullscreenChange: (active: boolean) => void;
+  onDevToolsChange: (suspected: boolean) => void;
 };
 
 function roundedGap(value: number): number {
@@ -42,6 +43,7 @@ export function useExamDeterrents({
   sendEvent,
   onBlockedAction,
   onFullscreenChange,
+  onDevToolsChange,
 }: Options): void {
   useEffect(() => {
     if (!enabled) return;
@@ -51,6 +53,8 @@ export function useExamDeterrents({
     let blurredAt: number | null = null;
     let resizeTimer: number | null = null;
     let consecutiveDimensionSignals = 0;
+    let consecutiveCleanDimensionSignals = 0;
+    let devToolsGateActive = false;
     let lastDimensionReportAt = 0;
     const tabId = crypto.randomUUID();
 
@@ -213,9 +217,25 @@ export function useExamDeterrents({
       });
     }
 
-    const dimensionInterval = window.setInterval(() => {
+    const inspectDimensions = () => {
       const signal = getDevToolsDimensionSignal(window);
-      consecutiveDimensionSignals = signal ? consecutiveDimensionSignals + 1 : 0;
+      if (signal) {
+        consecutiveDimensionSignals += 1;
+        consecutiveCleanDimensionSignals = 0;
+      } else {
+        consecutiveDimensionSignals = 0;
+        consecutiveCleanDimensionSignals += 1;
+      }
+
+      if (consecutiveDimensionSignals >= 2 && !devToolsGateActive) {
+        devToolsGateActive = true;
+        onDevToolsChange(true);
+      }
+      if (consecutiveCleanDimensionSignals >= 2 && devToolsGateActive) {
+        devToolsGateActive = false;
+        onDevToolsChange(false);
+      }
+
       const now = Date.now();
       if (signal && consecutiveDimensionSignals >= 2 && now - lastDimensionReportAt >= 30_000) {
         lastDimensionReportAt = now;
@@ -225,7 +245,9 @@ export function useExamDeterrents({
           height_gap: roundedGap(signal.heightDiff),
         });
       }
-    }, 3_000);
+    };
+    inspectDimensions();
+    const dimensionInterval = window.setInterval(inspectDimensions, 1_000);
 
     return () => {
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
@@ -234,5 +256,5 @@ export function useExamDeterrents({
       channel?.close();
       if (registryRef.current === registry) registryRef.current = null;
     };
-  }, [enabled, onBlockedAction, onFullscreenChange, registryRef, sendEvent]);
+  }, [enabled, onBlockedAction, onDevToolsChange, onFullscreenChange, registryRef, sendEvent]);
 }

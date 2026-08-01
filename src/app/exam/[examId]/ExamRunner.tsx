@@ -135,10 +135,12 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [readinessMessage, setReadinessMessage] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const [fullscreenPaused, setFullscreenPaused] = useState(false);
+  const [devToolsPaused, setDevToolsPaused] = useState(false);
   const accessTokenRef = useRef<string | null>(null);
   const listenerRegistryRef = useRef<ExamListenerRegistry | null>(null);
   const restoreRequestedRef = useRef(false);
   const fullscreenPausedRef = useRef(false);
+  const devToolsPausedRef = useRef(false);
 
   const requestHeaders = useCallback(
     (json = false, token = accessTokenRef.current): HeadersInit => ({
@@ -246,17 +248,36 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     setConfirmOpen(false);
   }, [onBlockedAction]);
 
+  const onDevToolsChange = useCallback((suspected: boolean) => {
+    if (!suspected) {
+      devToolsPausedRef.current = false;
+      setDevToolsPaused(false);
+      return;
+    }
+    if (!devToolsPausedRef.current) {
+      onBlockedAction("Developer tools or a large browser panel were detected. Close them to continue.");
+    }
+    devToolsPausedRef.current = true;
+    setDevToolsPaused(true);
+    setConfirmOpen(false);
+  }, [onBlockedAction]);
+
   useExamDeterrents({
-    enabled: Boolean(started && exam && !exam.taken && channelStatus !== "locked"),
+    enabled: Boolean(exam && !exam.taken && channelStatus !== "locked"),
     registryRef: listenerRegistryRef,
     sendEvent,
     onBlockedAction,
     onFullscreenChange,
+    onDevToolsChange,
   });
 
   async function beginExam() {
     setReadinessMessage(null);
     try {
+      if (devToolsPausedRef.current) {
+        setReadinessMessage("Close developer tools or large browser panels before starting the exam.");
+        return;
+      }
       if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) {
         setReadinessMessage("Fullscreen is required to take this exam. Use a browser that supports fullscreen.");
         return;
@@ -295,6 +316,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       !current ||
       channelStatus !== "connected" ||
       fullscreenPausedRef.current ||
+      devToolsPausedRef.current ||
       !document.fullscreenElement
     ) {
       if (started && !document.fullscreenElement) onFullscreenChange(false);
@@ -332,6 +354,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       !exam?.can_submit ||
       channelStatus !== "connected" ||
       fullscreenPausedRef.current ||
+      devToolsPausedRef.current ||
       !document.fullscreenElement
     ) {
       if (started && !document.fullscreenElement) onFullscreenChange(false);
@@ -481,6 +504,26 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     );
   }
 
+  if (started && devToolsPaused && !exam.taken) {
+    return (
+      <Card variant="outlined">
+        <CardContent>
+          <Stack spacing={3}>
+            <LockOutlined color="error" fontSize="large" />
+            <Typography variant="h4">Exam paused — close developer tools</Typography>
+            <Alert severity="error" role="alert">
+              <AlertTitle>Developer tools or a large browser panel are open</AlertTitle>
+              Questions and answer controls are blocked. Close the panel and restore the browser window to continue.
+            </Alert>
+            <Typography color="text.secondary">
+              The check runs automatically. Your accepted answers and the secure heartbeat remain active while this screen is shown.
+            </Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!started) {
     return (
       <Fade in timeout={225}>
@@ -546,9 +589,15 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                     Close unrelated tabs and apps, use a stable connection, and allow fullscreen. A secure integrity connection will open before the first question becomes usable.
                   </Alert>
                   {readinessMessage ? <Alert severity="warning" role="alert">{readinessMessage}</Alert> : null}
+                  {devToolsPaused ? (
+                    <Alert severity="error" role="alert">
+                      <AlertTitle>Close developer tools first</AlertTitle>
+                      Developer tools or a large browser panel were detected. The start button will unlock automatically after the panel closes.
+                    </Alert>
+                  ) : null}
                   <Stack direction={{ xs: "column-reverse", sm: "row" }} spacing={2}>
                     <Button variant="outlined" onClick={() => setReadinessStep(0)}>Back to rules</Button>
-                    <Button variant="contained" size="large" startIcon={<FullscreenRounded />} onClick={() => void beginExam()}>
+                    <Button variant="contained" size="large" startIcon={<FullscreenRounded />} disabled={devToolsPaused} onClick={() => void beginExam()}>
                       Enter fullscreen and start
                     </Button>
                   </Stack>
