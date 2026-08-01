@@ -23,9 +23,12 @@ function header(text) {
   console.log(`${"=".repeat(60)}`);
 }
 
-async function test(label, method, url, body = undefined) {
+async function test(label, method, url, body = undefined, headers = {}) {
   const fullUrl = `${BASE}${url}`;
-  const options = { method, headers: { "Content-Type": "application/json" } };
+  const options = {
+    method,
+    headers: { "Content-Type": "application/json", ...headers },
+  };
   if (body !== undefined) options.body = JSON.stringify(body);
 
   let status, responseBody, error;
@@ -49,6 +52,62 @@ async function test(label, method, url, body = undefined) {
   else failed++;
 
   return { ok, status, body: responseBody };
+}
+
+function examHeaders(attemptToken) {
+  return { Authorization: `Bearer ${attemptToken}` };
+}
+
+async function answerAllQuestions(label, examId, launch, examDocument) {
+  const attemptToken = launch?.attempt_token;
+  if (!attemptToken) {
+    console.log(`    Missing attempt token for ${label}`);
+    failed++;
+    return null;
+  }
+
+  const sourceQuestions = new Map(
+    (examDocument?.generated_questions || []).map((question) => [
+      String(question.question_id),
+      question,
+    ])
+  );
+  let view = launch;
+  let questionNumber = 0;
+
+  while (view?.current_question) {
+    const question = view.current_question;
+    const source = sourceQuestions.get(String(question.question_id));
+    const answer =
+      question.type === "mcq"
+        ? source?.correct_option
+        : "This is a placeholder essay answer for testing purposes.";
+
+    if (!answer) {
+      console.log(`    Missing test answer for question ${question.question_id}`);
+      failed++;
+      return null;
+    }
+
+    questionNumber++;
+    const response = await test(
+      `${label} question ${questionNumber}`,
+      "POST",
+      `/api/exams/${examId}/answer`,
+      {
+        question_id: question.question_id,
+        answer,
+        action: "answer",
+        revision: view.answer_revision,
+        idempotency_key: `api-test-${examId}-${view.answer_revision}`,
+      },
+      examHeaders(attemptToken)
+    );
+    if (!response.ok) return null;
+    view = response.body;
+  }
+
+  return view?.can_submit ? attemptToken : null;
 }
 
 /* ────────────────────────────────────────────
@@ -208,7 +267,7 @@ async function main() {
   }
 
   /* 5–6 ─ For each chapter: start + submit quiz ── */
-  const submittedQuizIds = [];
+  const submittedQuizzes = [];
 
   for (let i = 0; i < chapterIds.length; i++) {
     const cid = chapterIds[i];
@@ -221,37 +280,39 @@ async function main() {
 
     if (!r5.ok) continue;
 
-    const exam = r5.body?.exam || r5.body;
+    const exam = r5.body;
     const eid = exam?._id;
     if (!eid) continue;
 
-    /* read generated_questions from DB (correct_option is stripped from API response) */
+    /* Read answers from DB while exercising the public one-question-at-a-time API. */
     const doc = await Exam.findById(eid).lean();
-    const questions = doc?.generated_questions || [];
-    const answers = questions
-      .filter((q) => q.type === "mcq" && q.correct_option)
-      .map((q) => ({ question_id: q.question_id, answer: q.correct_option }));
-
-    if (answers.length === 0) {
-      console.log(`    ⚠️ No MCQ questions found for chapter ${i + 1}, skipping submit`);
-      continue;
-    }
+    const attemptToken = await answerAllQuestions(
+      `6. Answer quiz – chapter ${i + 1}`,
+      eid,
+      r5.body,
+      doc
+    );
+    if (!attemptToken) continue;
 
     const r6 = await test(
       `6. Submit quiz – chapter ${i + 1}`,
       "POST",
       `/api/exams/${eid}/submit`,
-      { student_answers: answers }
+      undefined,
+      examHeaders(attemptToken)
     );
-    if (r6.ok) submittedQuizIds.push(eid);
+    if (r6.ok) submittedQuizzes.push({ examId: eid, attemptToken });
   }
 
   /* 7 ─ GET /api/exams/:id ────────────────── */
-  if (submittedQuizIds.length > 0) {
+  if (submittedQuizzes.length > 0) {
+    const lastQuiz = submittedQuizzes[submittedQuizzes.length - 1];
     await test(
       "7. Get exam details (last submitted quiz)",
       "GET",
-      `/api/exams/${submittedQuizIds[submittedQuizIds.length - 1]}`
+      `/api/exams/${lastQuiz.examId}`,
+      undefined,
+      examHeaders(lastQuiz.attemptToken)
     );
   }
 
@@ -281,6 +342,7 @@ async function main() {
 
   /* 9 ─ POST /api/exams/mid/:id/start ────── */
   let startedMidId = null;
+  let startedMidToken = null;
 
   for (const midId of createdMidIds) {
     const r9 = await test(
@@ -291,6 +353,7 @@ async function main() {
     );
     if (r9.ok) {
       startedMidId = midId;
+      startedMidToken = r9.body?.attempt_token;
       break;
     }
   }
@@ -301,25 +364,29 @@ async function main() {
       '10a. Proctoring – tab_switch',
       "POST",
       `/api/exams/${startedMidId}/proctoring-event`,
-      { type: "tab_switch", student_id: aliceId, metadata: { to: "youtube" } }
+      { type: "tab_switch", student_id: aliceId, metadata: { to: "youtube" } },
+      examHeaders(startedMidToken)
     );
     await test(
       '10b. Proctoring – copy_paste',
       "POST",
       `/api/exams/${startedMidId}/proctoring-event`,
-      { type: "copy_paste", student_id: aliceId }
+      { type: "copy_paste", student_id: aliceId },
+      examHeaders(startedMidToken)
     );
     await test(
       '10c. Proctoring – devtools_open',
       "POST",
       `/api/exams/${startedMidId}/proctoring-event`,
-      { type: "devtools_open", student_id: aliceId }
+      { type: "devtools_open", student_id: aliceId },
+      examHeaders(startedMidToken)
     );
     await test(
       '10d. Proctoring – no_face (camera)',
       "POST",
       `/api/exams/${startedMidId}/proctoring-event`,
-      { type: "no_face", student_id: aliceId, detected: true }
+      { type: "no_face", student_id: aliceId, detected: true },
+      examHeaders(startedMidToken)
     );
   }
 
@@ -344,6 +411,8 @@ async function main() {
 
   /* 12 ─ POST /api/exams/final/start ──────── */
   let finalExamId = null;
+  let finalExamToken = null;
+  let finalExamLaunch = null;
 
   if (curriculumId) {
     const r12 = await test("12. Start final exam", "POST", "/api/exams/final/start", {
@@ -352,6 +421,8 @@ async function main() {
     });
     if (r12.ok) {
       finalExamId = r12.body?._id;
+      finalExamToken = r12.body?.attempt_token;
+      finalExamLaunch = r12.body;
       console.log(`    finalExamId → ${finalExamId}`);
     }
   }
@@ -362,25 +433,29 @@ async function main() {
       '12a. Proctoring (final) – fullscreen_exit',
       "POST",
       `/api/exams/${finalExamId}/proctoring-event`,
-      { type: "fullscreen_exit", student_id: aliceId }
+      { type: "fullscreen_exit", student_id: aliceId },
+      examHeaders(finalExamToken)
     );
   }
 
   /* 13 ─ POST /api/exams/:id/submit (final) ─ */
   if (finalExamId) {
     const doc = await Exam.findById(finalExamId).lean();
-    const questions = doc?.generated_questions || [];
-    const answers = questions.map((q) => ({
-      question_id: q.question_id,
-      answer:
-        q.type === "mcq"
-          ? q.correct_option
-          : "This is a placeholder essay answer for testing purposes.",
-    }));
-
-    await test("13. Submit final exam", "POST", `/api/exams/${finalExamId}/submit`, {
-      student_answers: answers,
-    });
+    finalExamToken = await answerAllQuestions(
+      "13. Answer final exam",
+      finalExamId,
+      finalExamLaunch,
+      doc
+    );
+    if (finalExamToken) {
+      await test(
+        "13. Submit final exam",
+        "POST",
+        `/api/exams/${finalExamId}/submit`,
+        undefined,
+        examHeaders(finalExamToken)
+      );
+    }
   }
 
   /* 14 ─ POST /api/exams/:id/grade ────────── */
