@@ -802,6 +802,7 @@ export async function submitExam(
   const session = await ExamSession.findOne({ exam_id: examIdObj });
   if (session) {
     session.status = "completed";
+    session.integrity_state = "submitted";
     session.ended_at = new Date();
     session.terminated_reason = "student_submitted";
     await session.save();

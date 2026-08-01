@@ -75,9 +75,26 @@ export const integrityEventMessageSchema = z
   })
   .strict();
 
+export const integrityHeartbeatSchema = z
+  .object({
+    version: z.literal(1),
+    type: z.literal("heartbeat"),
+    challenge_token: z.string().min(40).max(2_048),
+    heartbeat_sequence: z.number().int().positive(),
+    last_event_sequence: z.number().int().min(0),
+    registry_version: z.string().min(1).max(120),
+    registry_digest: z.string().min(1).max(128),
+    listener_count: z.number().int().min(0).max(100),
+    visibility_state: z.enum(["visible", "hidden", "prerender", "unknown"]),
+    lifecycle_state: z.enum(["active", "passive", "hidden", "frozen", "unknown"]),
+    client_build: z.string().min(1).max(120),
+  })
+  .strict();
+
 export const integrityClientMessageSchema = z.discriminatedUnion("type", [
   integrityAuthenticateSchema,
   integrityEventMessageSchema,
+  integrityHeartbeatSchema,
 ]);
 
 export type IntegrityClientMessage = z.infer<typeof integrityClientMessageSchema>;

@@ -236,6 +236,15 @@ async function seed(): Promise<void> {
       suspicion_score: 0,
       flagged: false,
       status: "in_progress",
+      integrity_state: "active",
+      current_question_index: 0,
+      answer_revision: 0,
+      answers: [],
+      heartbeat_consecutive_misses: 0,
+      last_integrity_sequence: 0,
+      active_connection_id: null,
+      heartbeat_grace_until: null,
+      integrity_lock_reason: null,
     },
     { upsert: true }
   );
@@ -248,6 +257,7 @@ async function seed(): Promise<void> {
       suspicion_score: 55,
       flagged: true,
       status: "completed",
+      integrity_state: "submitted",
       terminated_reason: "student_submitted",
     },
     { upsert: true }
