@@ -14,7 +14,9 @@ Every blocked action shows text feedback. No key contents, clipboard contents, a
 
 ## Supporting context
 
-Visibility, focus, fullscreen, page lifecycle, network state, resize, CSP violations, same-origin exam storage changes, duplicate tabs, and media-device counts are recorded with minimum metadata. Resize/docked-DevTools detection is low confidence and can never lock an exam by itself.
+Visibility, focus, fullscreen, page lifecycle, network state, resize, CSP violations, same-origin exam storage changes, duplicate tabs, and media-device counts are recorded with minimum metadata. One focus loss immediately flags the attempt for human review; it does not invalidate or terminate the attempt.
+
+Resize/docked-DevTools detection is low confidence, so it cannot invalidate an exam by itself. Two matching samples pause and hide the exam controls, including when the panel was already open before the exam page loaded. Two clean samples automatically remove the pause. The signed heartbeat remains active throughout this reversible gate.
 
 ## Deliberate exclusions
 

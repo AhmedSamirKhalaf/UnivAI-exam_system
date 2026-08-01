@@ -23,6 +23,12 @@ test("one low-confidence dimension signal cannot independently raise a review", 
   assert.equal(result.contributions.length, 0);
 });
 
+test("one window focus loss immediately flags the attempt for review", () => {
+  const result = scoreIntegrityTimeline([event("window_blur", 0)]);
+  assert.equal(result.band, "review");
+  assert.ok(result.reviewPriority >= 35);
+});
+
 test("the provisional policy adds a visible pair contribution", () => {
   const shortcutOnly = scoreIntegrityTimeline([event("restricted_shortcut", 0)]);
   const paired = scoreIntegrityTimeline([

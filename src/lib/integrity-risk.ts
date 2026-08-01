@@ -66,15 +66,15 @@ export type IntegrityRiskResult = {
 };
 
 export const provisionalIntegrityModel: ExplainableRiskModel = {
-  version: "univai-integrity-provisional-v1",
+  version: "univai-integrity-provisional-v2",
   featureSchemaVersion: "integrity-features-v1",
-  policyVersion: "human-review-v1",
+  policyVersion: "human-review-v2",
   calibrationVersion: null,
   mode: "provisional_rules",
   intercept: -3.2,
   mainEffects: [
     { event: "visibility_hidden", perOccurrence: 0.35, cap: 1.05 },
-    { event: "window_blur", perOccurrence: 0.15, cap: 0.45 },
+    { event: "window_blur", perOccurrence: 2.6, cap: 2.6 },
     { event: "fullscreen_exit", perOccurrence: 0.6, cap: 1.2 },
     { event: "restricted_shortcut", perOccurrence: 1.4, cap: 2.8 },
     { event: "context_menu_attempt", perOccurrence: 0.5, cap: 1 },

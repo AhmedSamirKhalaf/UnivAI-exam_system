@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import { IntegrityEvent } from "@/models/IntegrityEvent";
+import { Exam } from "@/models/Exam";
 import { ExamSession } from "@/models/ExamSession";
 import { scoreIntegrityTimeline } from "@/lib/integrity-risk";
 
@@ -38,6 +39,12 @@ export async function refreshIntegrityRisk(examId: string | Types.ObjectId): Pro
       ...(result.probability === null ? { $unset: { risk_probability: "" } } : {}),
     },
   );
+  if (result.band !== "observe") {
+    await Exam.updateOne(
+      { _id: examId, review_status: "not_required" },
+      { $set: { review_status: "pending" } },
+    );
+  }
 }
 
 export function scheduleIntegrityRiskRefresh(
