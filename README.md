@@ -10,7 +10,8 @@ all use fixed identifiers and an idempotent seed.
 ```powershell
 npm install
 npm run dev:standalone
-# http://localhost:3200/dev
+# Keep this terminal open.
+# Open http://localhost:3200/dev in a browser to choose a scenario.
 
 npm run standalone:seed
 npm run smoke:standalone

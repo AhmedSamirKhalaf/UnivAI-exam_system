@@ -296,9 +296,39 @@ async function reset(): Promise<void> {
 }
 
 function docker(action: "up" | "down"): void {
+  if (action === "up") {
+    const daemon = spawnSync("docker", ["info"], { stdio: "ignore", shell: false });
+    if (daemon.status !== 0) {
+      throw new Error(
+        "Docker is not available. Start Docker Desktop, then run npm run dev:standalone again."
+      );
+    }
+    console.log("Starting standalone MongoDB on 127.0.0.1:27018...");
+  }
   const args = action === "up" ? [...compose, "up", "-d", "--wait"] : [...compose, "down"];
   const result = spawnSync("docker", args, { stdio: "inherit", shell: false });
   if (result.status !== 0) throw new Error(`docker compose ${action} failed`);
+}
+
+async function waitForHealth(child: ReturnType<typeof spawn>, seconds = 60): Promise<void> {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Exam server exited before it became ready (code ${child.exitCode}).`);
+    }
+    try {
+      const response = await fetch("http://127.0.0.1:3200/api/health", {
+        cache: "no-store",
+      });
+      if (response.ok) return;
+    } catch {
+      // Next.js is still compiling.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(
+    "Exam server did not become ready on port 3200 within 60 seconds. Check the Next.js output above."
+  );
 }
 
 async function smoke(): Promise<void> {
@@ -332,7 +362,14 @@ async function main(): Promise<void> {
     await mongoose.disconnect();
     const child = spawn(
       process.execPath,
-      [path.resolve("node_modules", "next", "dist", "bin", "next"), "dev", "-p", "3200"],
+      [
+        path.resolve("node_modules", "next", "dist", "bin", "next"),
+        "dev",
+        "-H",
+        "0.0.0.0",
+        "-p",
+        "3200",
+      ],
       {
         stdio: "inherit",
         env: {
@@ -342,6 +379,14 @@ async function main(): Promise<void> {
         },
       }
     );
+    try {
+      await waitForHealth(child);
+      console.log("Standalone Exam is running: http://localhost:3200");
+      console.log("Open the test scenarios: http://localhost:3200/dev");
+    } catch (error) {
+      child.kill();
+      throw error;
+    }
     child.on("exit", (code) => process.exit(code ?? 0));
     return;
   } else {
