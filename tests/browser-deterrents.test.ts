@@ -39,8 +39,8 @@ test("main-thread deterrents have no pause trap or sensitive payload collection"
   assert.equal(source.includes("innerHTML"), false);
 });
 
-test("an isolated IIFE worker repeatedly pauses only when an inspector is listening", async () => {
-  const worker = await readFile(
+test("a main-page IIFE repeatedly pauses when an inspector is listening", async () => {
+  const script = await readFile(
     new URL("../public/exam-debug-deterrent.js", import.meta.url),
     "utf8",
   );
@@ -48,11 +48,13 @@ test("an isolated IIFE worker repeatedly pauses only when an inspector is listen
     new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
     "utf8",
   );
-  assert.match(worker, /^\(\(\) => \{/);
-  assert.match(worker, /\bdebugger;/);
-  assert.match(worker, /setTimeout\(pauseWhenInspectorIsListening, 1250\)/);
-  assert.match(deterrents, /new Worker\("\/exam-debug-deterrent\.js"/);
-  assert.match(deterrents, /devToolsWorker\?\.terminate\(\)/);
+  assert.match(script, /^\(\(\) => \{/);
+  assert.match(script, /\bdebugger;/);
+  assert.match(script, /window\.setTimeout\(pauseWhenInspectorIsListening, 1250\)/);
+  assert.match(script, /window\.addEventListener\(stopEventName, stop\)/);
+  assert.match(deterrents, /document\.createElement\("script"\)/);
+  assert.match(deterrents, /devToolsScript\.src = "\/exam-debug-deterrent\.js"/);
+  assert.match(deterrents, /window\.dispatchEvent\(new Event\("univai:stop-debug-deterrent"\)\)/);
 });
 
 test("fullscreen changes are reported to the hard exam gate", async () => {
