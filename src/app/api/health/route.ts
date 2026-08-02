@@ -4,6 +4,8 @@ import {
   isStandalone,
 } from "@/lib/runtime";
 import { Exam } from "@/models/Exam";
+import { AUDIT_SCHEMA_VERSION, INTEGRITY_POLICY_VERSION } from "@/lib/audit-log";
+import { loadRateLimitConfig } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,13 @@ export async function GET() {
       seed: isStandalone() ? STANDALONE_SEED_VERSION : null,
       seededScenarios,
       webhook: isStandalone() ? "local capture" : "configured callback",
+      hardening: {
+        request_validation: "strict-schemas-v1",
+        rate_limits: loadRateLimitConfig(),
+        idempotency: "enabled",
+        audit_schema: AUDIT_SCHEMA_VERSION,
+        integrity_policy: INTEGRITY_POLICY_VERSION,
+      },
     });
   } catch (error) {
     return Response.json(

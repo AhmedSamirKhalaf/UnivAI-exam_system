@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { publishQuestions } from "@/lib/blueprint-validator";
+import { writeAudit } from "@/lib/audit-log";
 import { AssessmentBlueprint } from "@/models/AssessmentBlueprint";
 import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { assessmentBlueprintSchema } from "@/schemas/assessment-blueprint";
@@ -159,6 +160,17 @@ export async function PUT(request: NextRequest) {
       })),
       { ordered: true },
     );
+
+    await writeAudit({
+      actor: { type: "system", id: "blueprint-publisher" },
+      action: "question.published",
+      resource: { type: "blueprint", id: blueprint._id.toString() },
+      metadata: {
+        plan_version: blueprint.plan_version ?? null,
+        question_count: published.length,
+      },
+    });
+
     return Response.json({ questions }, { status: 201 });
   } catch (error: unknown) {
     if (isDuplicateKeyError(error)) {

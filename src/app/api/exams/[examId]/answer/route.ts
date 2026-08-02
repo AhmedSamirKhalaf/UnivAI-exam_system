@@ -6,6 +6,7 @@ import {
   requireExamAttempt,
   saveCurrentAnswer,
 } from "@/lib/exam-attempt";
+import { examRateLimiter } from "@/lib/rate-limit";
 
 export async function POST(
   request: NextRequest,
@@ -15,6 +16,7 @@ export async function POST(
     await connectDB();
     const { examId } = await params;
     await requireExamAttempt(request, examId);
+    examRateLimiter.enforce({ kind: "session", id: examId });
     const input = answerCurrentQuestionSchema.parse(await request.json());
     return Response.json(await saveCurrentAnswer(examId, input));
   } catch (error: unknown) {

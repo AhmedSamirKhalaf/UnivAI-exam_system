@@ -8,6 +8,12 @@ import {
   getServerStoredAnswers,
   requireExamAttempt,
 } from "@/lib/exam-attempt";
+import { examRateLimiter } from "@/lib/rate-limit";
+import {
+  idempotencyKeyFromRequest,
+  MongoIdempotencyStore,
+  withIdempotency,
+} from "@/lib/idempotency";
 
 export async function POST(
   request: NextRequest,
@@ -17,13 +23,31 @@ export async function POST(
     await connectDB();
     const { examId } = await params;
     await requireExamAttempt(request, examId);
-    const exam = await submitExam(examId, await getServerStoredAnswers(examId));
+    examRateLimiter.enforce({ kind: "session", id: examId });
 
-    // Result + proctoring report go back to the UnivAI app. Fire-and-forget:
-    // a dead webhook must never break a student's submission.
-    void sendResultWebhook(exam);
+    const idempotencyKey = idempotencyKeyFromRequest(request);
 
-    return Response.json(await getExamAttemptView(examId), { status: 200 });
+    const run = async () => {
+      const exam = await submitExam(examId, await getServerStoredAnswers(examId));
+
+      // Result + proctoring report go back to the UnivAI app. Fire-and-forget:
+      // a dead webhook must never break a student's submission.
+      void sendResultWebhook(exam);
+
+      return getExamAttemptView(examId);
+    };
+
+    if (idempotencyKey) {
+      const { result } = await withIdempotency(
+        new MongoIdempotencyStore(),
+        idempotencyKey,
+        examId,
+        run,
+      );
+      return Response.json(result, { status: 200 });
+    }
+
+    return Response.json(await run(), { status: 200 });
   } catch (error: unknown) {
     return examAttemptErrorResponse(error);
   }
