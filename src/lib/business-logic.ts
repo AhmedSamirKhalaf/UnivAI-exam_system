@@ -16,6 +16,7 @@ import {
   type RandomSource,
 } from "@/lib/deterministic-rng";
 import { isStandalone } from "@/lib/runtime";
+import { INTEGRITY_POLICY_VERSION, writeAudit } from "@/lib/audit-log";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -151,6 +152,16 @@ async function bumpSuspicionScore(
       invalidated_at: new Date(),
       policy_action: "session_invalidated",
       review_status: "pending",
+    });
+    await writeAudit({
+      actor: { type: "system", id: "proctoring-policy" },
+      action: "integrity.session_invalidated",
+      resource: { type: "exam", id: examId.toString() },
+      metadata: {
+        suspicion_score: newScore,
+        threshold: PROCTORING_CONFIG.suspicionThreshold,
+        policy_version: INTEGRITY_POLICY_VERSION,
+      },
     });
   }
 
@@ -329,6 +340,18 @@ export async function startQuiz(
       status: "in_progress",
     });
 
+    await writeAudit({
+      actor: { type: "student", id: studentIdObj.toString() },
+      action: "attempt.start",
+      resource: { type: "exam", id: exam._id.toString() },
+      metadata: {
+        exam_type: "quiz",
+        chapter_id: chapterIdObj.toString(),
+        attempt_number: exam.attempt_number,
+        question_count: questionCount,
+      },
+    });
+
     return { exam, created: false };
   }
 
@@ -419,6 +442,17 @@ export async function startMid(
     suspicion_score: 0,
     flagged: false,
     status: "in_progress",
+  });
+
+  await writeAudit({
+    actor: { type: "student", id: exam.student_id.toString() },
+    action: "attempt.start",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      exam_type: "mid",
+      attempt_number: exam.attempt_number,
+      question_count: count,
+    },
   });
 
   return exam;
@@ -547,6 +581,18 @@ export async function startFinal(
     suspicion_score: 0,
     flagged: false,
     status: "in_progress",
+  });
+
+  await writeAudit({
+    actor: { type: "student", id: studentIdObj.toString() },
+    action: "attempt.start",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      exam_type: "final",
+      curriculum_id: curriculumIdObj.toString(),
+      attempt_number: exam.attempt_number,
+      question_count: questions.length,
+    },
   });
 
   return exam;
@@ -812,6 +858,20 @@ export async function submitExam(
     await notifyIntegrityInvalidation(exam);
   }
 
+  await writeAudit({
+    actor: { type: "student", id: exam.student_id.toString() },
+    action: "attempt.submit",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      exam_type: exam.type,
+      grading_status: exam.grading_status,
+      integrity_status: exam.integrity_status,
+      policy_action: exam.policy_action,
+      mark: exam.mark ?? null,
+      passed: exam.passed,
+    },
+  });
+
   return exam;
 }
 
@@ -876,6 +936,18 @@ export async function gradeFinal(
   exam.passed = mark >= 50;
   exam.grading_status = "graded";
   await exam.save();
+
+  await writeAudit({
+    actor: { type: "instructor", id: gradedBy },
+    action: "grading.final",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      mark,
+      passed: mark >= 50,
+      is_regrade: isRegrade,
+      reason: reason || (isRegrade ? "regrade" : "initial grade"),
+    },
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -920,6 +992,17 @@ export async function resolveIntegrityAppeal(
   }
   if (resolution === "upheld") exam.review_status = "upheld";
   await exam.save();
+
+  await writeAudit({
+    actor: { type: "admin", id: resolvedBy },
+    action: "integrity.appeal_resolved",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      resolution,
+      allow_retake: allowRetake,
+      integrity_status: exam.integrity_status,
+    },
+  });
 }
 
 /* ------------------------------------------------------------------ */

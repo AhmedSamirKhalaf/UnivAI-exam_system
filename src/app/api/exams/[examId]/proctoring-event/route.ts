@@ -5,16 +5,19 @@ import {
   recordDiscreteEvent,
   recordCameraEvent,
 } from "@/lib/business-logic";
-import { examAttemptErrorResponse, requireExamAttempt } from "@/lib/exam-attempt";
+import {
+  ExamAttemptError,
+  examAttemptErrorResponse,
+  requireExamAttempt,
+} from "@/lib/exam-attempt";
+import {
+  parseJsonBody,
+  proctoringEventSchema,
+  requestValidationErrorResponse,
+} from "@/lib/request-validation";
+import { examRateLimiter } from "@/lib/rate-limit";
 
 const CAMERA_EVENT_TYPES = ["no_face", "multiple_faces"];
-const DISCRETE_EVENT_TYPES = [
-  "fullscreen_exit",
-  "tab_switch",
-  "copy_paste",
-  "devtools_open",
-];
-const ALL_EVENT_TYPES = [...CAMERA_EVENT_TYPES, ...DISCRETE_EVENT_TYPES];
 
 export async function POST(
   request: NextRequest,
@@ -24,24 +27,17 @@ export async function POST(
     await connectDB();
     const { examId } = await params;
     const session = await requireExamAttempt(request, examId);
-    const body = await request.json();
-    const { type, detected, metadata } = body;
-
-    if (!type) {
-      return Response.json(
-        { error: "type is required" },
-        { status: 400 }
-      );
+    examRateLimiter.enforce({ kind: "session", id: examId });
+    const body = await parseJsonBody(request, proctoringEventSchema);
+    if (
+      body.student_id &&
+      session &&
+      session.student_id.toString() !== body.student_id
+    ) {
+      throw new ExamAttemptError("Exam session does not belong to this student", 403);
     }
 
-    if (!ALL_EVENT_TYPES.includes(type)) {
-      return Response.json(
-        { error: `Invalid proctoring event type: ${type}` },
-        { status: 400 }
-      );
-    }
-
-    if (CAMERA_EVENT_TYPES.includes(type)) {
+    if (CAMERA_EVENT_TYPES.includes(body.type)) {
       const exam = await Exam.findById(examId);
       if (!exam) {
         return Response.json({ error: "Exam not found" }, { status: 404 });
@@ -49,18 +45,20 @@ export async function POST(
       await recordCameraEvent(
         examId,
         session?.student_id ?? exam.student_id,
-        type as "no_face" | "multiple_faces",
-        detected ?? true
+        body.type as "no_face" | "multiple_faces",
+        body.detected ?? true
       );
     } else {
       if (!session) {
         return Response.json({ error: "Exam session not found" }, { status: 409 });
       }
-      await recordDiscreteEvent(examId, session.student_id, type, metadata);
+      await recordDiscreteEvent(examId, session.student_id, body.type, body.metadata);
     }
 
     return Response.json({ success: true }, { status: 200 });
   } catch (error: unknown) {
+    const validationResponse = requestValidationErrorResponse(error);
+    if (validationResponse) return validationResponse;
     const message = error instanceof Error ? error.message : "Unknown error";
     if (
       message.includes("not allowed") ||

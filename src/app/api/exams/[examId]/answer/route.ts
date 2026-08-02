@@ -6,6 +6,11 @@ import {
   requireExamAttempt,
   saveCurrentAnswer,
 } from "@/lib/exam-attempt";
+import { examRateLimiter } from "@/lib/rate-limit";
+import {
+  parseJsonBody,
+  requestValidationErrorResponse,
+} from "@/lib/request-validation";
 
 export async function POST(
   request: NextRequest,
@@ -15,9 +20,12 @@ export async function POST(
     await connectDB();
     const { examId } = await params;
     await requireExamAttempt(request, examId);
-    const input = answerCurrentQuestionSchema.parse(await request.json());
+    examRateLimiter.enforce({ kind: "session", id: examId });
+    const input = await parseJsonBody(request, answerCurrentQuestionSchema);
     return Response.json(await saveCurrentAnswer(examId, input));
   } catch (error: unknown) {
+    const boundaryResponse = requestValidationErrorResponse(error);
+    if (boundaryResponse) return boundaryResponse;
     return examAttemptErrorResponse(error);
   }
 }
