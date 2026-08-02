@@ -57,6 +57,15 @@ export function useExamDeterrents({
     let devToolsGateActive = false;
     let lastDimensionReportAt = 0;
     const tabId = crypto.randomUUID();
+    let devToolsWorker: Worker | null = null;
+
+    try {
+      devToolsWorker = new Worker("/exam-debug-deterrent.js", {
+        name: "univai-exam-deterrent",
+      });
+    } catch {
+      // The other browser deterrents remain active when workers are unavailable.
+    }
 
     const register = (
       name: string,
@@ -252,6 +261,7 @@ export function useExamDeterrents({
     return () => {
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       window.clearInterval(dimensionInterval);
+      devToolsWorker?.terminate();
       registry.dispose();
       channel?.close();
       if (registryRef.current === registry) registryRef.current = null;

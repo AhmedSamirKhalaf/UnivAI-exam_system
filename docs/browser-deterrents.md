@@ -20,7 +20,9 @@ Resize/docked-DevTools detection is low confidence, so it cannot invalidate an e
 
 ## Deliberate exclusions
 
-There is no repeated `debugger` statement. It is bypassable, implementation-defined, and pauses the answer-saving and heartbeat JavaScript that protects the attempt. Text selection is not blocked because selection is useful to accessibility tools and is not itself a violation. Continuous pointer movement and raw keystrokes are not collected.
+An isolated worker runs a small IIFE with a repeated `debugger` statement. The statement is effectively inert without an attached inspector and repeatedly pauses that worker when an inspector is listening, including undocked/window-mode DevTools. The worker is intentionally separate from the exam UI, answer saving, and signed heartbeat. This is only a deterrent: disabling breakpoints or resuming execution can bypass it, and it is not treated as evidence by itself.
+
+There is no repeated `debugger` statement on the main thread because pausing that thread would also pause answer saving and heartbeat protection. Text selection is not blocked because selection is useful to accessibility tools and is not itself a violation. Continuous pointer movement and raw keystrokes are not collected.
 
 Primary references:
 

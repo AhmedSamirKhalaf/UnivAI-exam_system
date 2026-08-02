@@ -28,7 +28,7 @@ test("restricted shortcut coverage includes Chromium Firefox Safari and screensh
   assert.equal(getRestrictedShortcut({ ...base, key: "c", ctrlKey: true }), null);
 });
 
-test("deterrent implementation has no debugger trap or sensitive payload collection", async () => {
+test("main-thread deterrents have no pause trap or sensitive payload collection", async () => {
   const source = await readFile(
     new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
     "utf8",
@@ -37,6 +37,22 @@ test("deterrent implementation has no debugger trap or sensitive payload collect
   assert.equal(source.includes("clipboardData.getData"), false);
   assert.equal(source.includes("event.key,"), false);
   assert.equal(source.includes("innerHTML"), false);
+});
+
+test("an isolated IIFE worker repeatedly pauses only when an inspector is listening", async () => {
+  const worker = await readFile(
+    new URL("../public/exam-debug-deterrent.js", import.meta.url),
+    "utf8",
+  );
+  const deterrents = await readFile(
+    new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /^\(\(\) => \{/);
+  assert.match(worker, /\bdebugger;/);
+  assert.match(worker, /setTimeout\(pauseWhenInspectorIsListening, 1250\)/);
+  assert.match(deterrents, /new Worker\("\/exam-debug-deterrent\.js"/);
+  assert.match(deterrents, /devToolsWorker\?\.terminate\(\)/);
 });
 
 test("fullscreen changes are reported to the hard exam gate", async () => {
