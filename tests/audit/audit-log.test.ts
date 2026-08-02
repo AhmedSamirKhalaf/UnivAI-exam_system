@@ -93,6 +93,19 @@ describe("audit log", () => {
     expect(sink.entries).toHaveLength(0);
   });
 
+  test("refuses sensitive keys nested inside metadata", async () => {
+    await expect(
+      writeAudit({
+        actor: { type: "system", id: "policy" },
+        action: "integrity.session_invalidated",
+        resource: { type: "exam", id: "e1" },
+        metadata: { provider: { credentials: { access_token: "leak" } } },
+      }),
+    ).rejects.toThrow(/access_token/);
+
+    expect(sink.entries).toHaveLength(0);
+  });
+
   test("rejects schema-invalid entries", () => {
     expect(() =>
       auditEntrySchema.parse({

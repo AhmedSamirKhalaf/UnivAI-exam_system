@@ -4,16 +4,23 @@ import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { publishQuestions } from "@/lib/blueprint-validator";
 import { writeAudit } from "@/lib/audit-log";
+import {
+  parseJsonBody,
+  requireTrustedService,
+  requestValidationErrorResponse,
+} from "@/lib/request-validation";
 import { AssessmentBlueprint } from "@/models/AssessmentBlueprint";
 import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { assessmentBlueprintSchema } from "@/schemas/assessment-blueprint";
 
-const publicationRequestSchema = z.object({
-  blueprint_id: z
-    .string()
-    .refine((value) => mongoose.isValidObjectId(value), "Invalid blueprint_id"),
-  questions: z.array(z.unknown()).min(1),
-});
+const publicationRequestSchema = z
+  .object({
+    blueprint_id: z
+      .string()
+      .refine((value) => mongoose.isValidObjectId(value), "Invalid blueprint_id"),
+    questions: z.array(z.unknown()).min(1).max(200),
+  })
+  .strict();
 
 function isDuplicateKeyError(error: unknown): boolean {
   return (
@@ -64,22 +71,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    requireTrustedService(request);
     await connectDB();
-    const body = await request.json().catch(() => null);
-    const parseResult = assessmentBlueprintSchema.safeParse(body);
-    if (!parseResult.success) {
-      return Response.json(
-        {
-          error: "Invalid assessment blueprint schema",
-          details: parseResult.error.issues,
-        },
-        { status: 400 },
-      );
-    }
+    const body = await parseJsonBody(request, assessmentBlueprintSchema);
 
-    const blueprint = await AssessmentBlueprint.create(parseResult.data);
+    const blueprint = await AssessmentBlueprint.create(body);
     return Response.json({ blueprint }, { status: 201 });
   } catch (error: unknown) {
+    const boundaryResponse = requestValidationErrorResponse(error);
+    if (boundaryResponse) return boundaryResponse;
     if (isDuplicateKeyError(error)) {
       return Response.json(
         {
@@ -106,21 +106,12 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
+    requireTrustedService(request);
     await connectDB();
-    const body = await request.json().catch(() => null);
-    const requestResult = publicationRequestSchema.safeParse(body);
-    if (!requestResult.success) {
-      return Response.json(
-        {
-          error: "Invalid publication request",
-          details: requestResult.error.issues,
-        },
-        { status: 400 },
-      );
-    }
+    const body = await parseJsonBody(request, publicationRequestSchema);
 
     const blueprint = await AssessmentBlueprint.findById(
-      requestResult.data.blueprint_id,
+      body.blueprint_id,
     ).lean();
     if (!blueprint) {
       return Response.json(
@@ -131,7 +122,7 @@ export async function PUT(request: NextRequest) {
 
     let published;
     try {
-      published = publishQuestions(requestResult.data.questions, blueprint);
+      published = publishQuestions(body.questions, blueprint);
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : "Publication refused" },
@@ -173,6 +164,8 @@ export async function PUT(request: NextRequest) {
 
     return Response.json({ questions }, { status: 201 });
   } catch (error: unknown) {
+    const boundaryResponse = requestValidationErrorResponse(error);
+    if (boundaryResponse) return boundaryResponse;
     if (isDuplicateKeyError(error)) {
       return Response.json(
         {

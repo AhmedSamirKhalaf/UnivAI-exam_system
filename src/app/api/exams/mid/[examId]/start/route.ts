@@ -6,6 +6,7 @@ import {
 import { createExamLaunch, examAttemptErrorResponse } from "@/lib/exam-attempt";
 import {
   parseJsonBody,
+  requireTrustedService,
   requestValidationErrorResponse,
   startMidSchema,
 } from "@/lib/request-validation";
@@ -21,6 +22,7 @@ export async function POST(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
+    requireTrustedService(request);
     await connectDB();
     const { examId } = await params;
     const body = await parseJsonBody(request, startMidSchema, {
@@ -28,7 +30,10 @@ export async function POST(
     });
     examRateLimiter.enforce({ kind: "session", id: examId });
 
-    const idempotencyKey = idempotencyKeyFromRequest(request);
+    const idempotencyKey = idempotencyKeyFromRequest(
+      request,
+      `mid-start:${examId}`,
+    );
     const fingerprint = JSON.stringify({
       examId,
       question_count: body.question_count ?? null,

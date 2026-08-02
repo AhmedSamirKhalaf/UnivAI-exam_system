@@ -80,7 +80,10 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
 
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
 
-export function idempotencyKeyFromRequest(request: Request): string | null {
+export function idempotencyKeyFromRequest(
+  request: Request,
+  scope?: string,
+): string | null {
   const raw = request.headers.get("Idempotency-Key");
   if (!raw) return null;
   const key = raw.trim();
@@ -90,8 +93,15 @@ export function idempotencyKeyFromRequest(request: Request): string | null {
       400,
     );
   }
-  return key;
+  return scope ? `${scope}:${key}` : key;
 }
+
+interface InFlightOperation {
+  fingerprint: string;
+  result: Promise<unknown>;
+}
+
+const inFlightOperations = new Map<string, InFlightOperation>();
 
 /**
  * Runs `run` once and records the result under `key`. A later call with the
@@ -115,12 +125,34 @@ export async function withIdempotency<T>(
     return { result: existing.response as T, idempotent: true };
   }
 
-  const result = await run();
-  await store.put({
-    key,
-    fingerprint,
-    response: result,
-    createdAt: new Date(),
-  });
-  return { result, idempotent: false };
+  const inFlight = inFlightOperations.get(key);
+  if (inFlight) {
+    if (inFlight.fingerprint !== fingerprint) {
+      throw new IdempotencyError(
+        "Idempotency-Key is already running with a different request",
+        422,
+      );
+    }
+    return { result: (await inFlight.result) as T, idempotent: true };
+  }
+
+  const execution = (async () => {
+    const result = await run();
+    await store.put({
+      key,
+      fingerprint,
+      response: result,
+      createdAt: new Date(),
+    });
+    return result;
+  })();
+  inFlightOperations.set(key, { fingerprint, result: execution });
+
+  try {
+    return { result: await execution, idempotent: false };
+  } finally {
+    if (inFlightOperations.get(key)?.result === execution) {
+      inFlightOperations.delete(key);
+    }
+  }
 }

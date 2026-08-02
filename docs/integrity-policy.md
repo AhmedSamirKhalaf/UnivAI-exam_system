@@ -52,10 +52,11 @@ resolution keeps the invalidation. Resolution is itself audited.
 
 ## Grades stay server-computed
 
-Final grades are computed on the server from the stored question set and the
-server-held answers. The client sends no grade; the browser cannot influence
-the mark except through its legitimate answers. `gradeFinal` is the only manual
-grade path and records the grader and regrade flag in the audit log.
+Quiz and midterm grades are computed on the server from the stored question set
+and server-held answers. Final essay marks use the manual `gradeFinal` path,
+which is restricted to an authenticated trusted-service caller and records the
+grader and regrade flag in the audit log. The student browser cannot call that
+path with its exam-attempt token.
 
 ## Known false-positive limitations
 

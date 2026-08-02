@@ -9,6 +9,7 @@ import {
   requireExamAttempt,
 } from "@/lib/exam-attempt";
 import { examRateLimiter } from "@/lib/rate-limit";
+import { requestValidationErrorResponse } from "@/lib/request-validation";
 import {
   idempotencyKeyFromRequest,
   MongoIdempotencyStore,
@@ -25,7 +26,7 @@ export async function POST(
     await requireExamAttempt(request, examId);
     examRateLimiter.enforce({ kind: "session", id: examId });
 
-    const idempotencyKey = idempotencyKeyFromRequest(request);
+    const idempotencyKey = idempotencyKeyFromRequest(request, `submit:${examId}`);
 
     const run = async () => {
       const exam = await submitExam(examId, await getServerStoredAnswers(examId));
@@ -49,6 +50,8 @@ export async function POST(
 
     return Response.json(await run(), { status: 200 });
   } catch (error: unknown) {
+    const boundaryResponse = requestValidationErrorResponse(error);
+    if (boundaryResponse) return boundaryResponse;
     return examAttemptErrorResponse(error);
   }
 }

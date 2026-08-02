@@ -59,10 +59,43 @@ describe("idempotency", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  test("coalesces concurrent replays before a result is stored", async () => {
+    const store = new InMemoryIdempotencyStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = vi.fn(async () => {
+      await gate;
+      return { ok: true };
+    });
+
+    const first = withIdempotency(store, "concurrent-001", "fp", run);
+    await Promise.resolve();
+    const replay = withIdempotency(store, "concurrent-001", "fp", run);
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledTimes(1);
+
+    release();
+    const [firstResult, replayResult] = await Promise.all([first, replay]);
+    expect(firstResult.idempotent).toBe(false);
+    expect(replayResult.idempotent).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   test("extracts a valid Idempotency-Key header", () => {
     expect(idempotencyKeyFromRequest(requestWithKey("start-quiz-001"))).toBe(
       "start-quiz-001",
     );
+  });
+
+  test("namespaces a key to its operation and resource", () => {
+    expect(
+      idempotencyKeyFromRequest(
+        requestWithKey("shared-key-001"),
+        "submit:exam-1",
+      ),
+    ).toBe("submit:exam-1:shared-key-001");
   });
 
   test("returns null when no header is present", () => {

@@ -1,4 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
+import { IdempotencyError } from "../../src/lib/idempotency";
+import { RateLimitError } from "../../src/lib/rate-limit";
 import {
   MAX_BODY_BYTES,
   RequestValidationError,
@@ -6,12 +8,22 @@ import {
   parseJsonBody,
   proctoringEventSchema,
   requestValidationErrorResponse,
+  requireTrustedService,
   startFinalSchema,
   startMidSchema,
   startQuizSchema,
 } from "../../src/lib/request-validation";
 
 const VALID_OBJECT_ID = "64b000000000000000000001";
+const originalMode = process.env.UNIVAI_MODE;
+const originalApiToken = process.env.UNIVAI_EXAM_API_TOKEN;
+
+afterEach(() => {
+  if (originalMode === undefined) delete process.env.UNIVAI_MODE;
+  else process.env.UNIVAI_MODE = originalMode;
+  if (originalApiToken === undefined) delete process.env.UNIVAI_EXAM_API_TOKEN;
+  else process.env.UNIVAI_EXAM_API_TOKEN = originalApiToken;
+});
 
 function jsonRequest(body: unknown): Request {
   return new Request("http://localhost/api/exam", {
@@ -150,6 +162,46 @@ describe("request validation", () => {
       expect(response!.status).toBe(400);
       const payload = await response!.json();
       expect(payload.error).toMatch(/Unknown fields are not allowed/);
+    }
+  });
+
+  test("maps rate limits and idempotency failures to their public statuses", () => {
+    const limited = requestValidationErrorResponse(new RateLimitError(1500));
+    expect(limited?.status).toBe(429);
+    expect(limited?.headers.get("Retry-After")).toBe("2");
+
+    const replay = requestValidationErrorResponse(
+      new IdempotencyError("conflict", 422),
+    );
+    expect(replay?.status).toBe(422);
+  });
+
+  test("requires a configured trusted-service token in integrated mode", () => {
+    process.env.UNIVAI_MODE = "integrated";
+    process.env.UNIVAI_EXAM_API_TOKEN = "s".repeat(32);
+
+    expect(() =>
+      requireTrustedService(
+        new Request("http://localhost/api/exam", {
+          headers: { Authorization: `Bearer ${"s".repeat(32)}` },
+        }),
+      ),
+    ).not.toThrow();
+
+    expect(() =>
+      requireTrustedService(new Request("http://localhost/api/exam")),
+    ).toThrow(/authentication failed/);
+  });
+
+  test("fails closed when trusted-service authentication is unconfigured", () => {
+    process.env.UNIVAI_MODE = "integrated";
+    delete process.env.UNIVAI_EXAM_API_TOKEN;
+
+    try {
+      requireTrustedService(new Request("http://localhost/api/exam"));
+      throw new Error("should not reach");
+    } catch (error) {
+      expect(requestValidationErrorResponse(error)?.status).toBe(503);
     }
   });
 });

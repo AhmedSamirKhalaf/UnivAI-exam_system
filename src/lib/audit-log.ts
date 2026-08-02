@@ -91,8 +91,20 @@ export function auditSink(): AuditSink {
 
 const SENSITIVE_METADATA_KEY = /answer|secret|token|password|correct_option|access_token|attempt_token/i;
 
-function containsSensitiveKeys(metadata: Record<string, unknown>): boolean {
-  return Object.keys(metadata).some((key) => SENSITIVE_METADATA_KEY.test(key));
+function sensitiveMetadataKey(
+  value: unknown,
+  seen = new Set<object>(),
+): string | null {
+  if (!value || typeof value !== "object") return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (SENSITIVE_METADATA_KEY.test(key)) return key;
+    const match = sensitiveMetadataKey(nested, seen);
+    if (match) return match;
+  }
+  return null;
 }
 
 export interface AuditInput {
@@ -104,11 +116,10 @@ export interface AuditInput {
 }
 
 export async function writeAudit(input: AuditInput): Promise<void> {
-  if (input.metadata && containsSensitiveKeys(input.metadata)) {
+  const sensitiveKey = sensitiveMetadataKey(input.metadata);
+  if (sensitiveKey) {
     throw new Error(
-      `Audit entry refused: metadata key "${Object.keys(input.metadata).find((key) =>
-        SENSITIVE_METADATA_KEY.test(key),
-      )}" may carry answers or secrets`,
+      `Audit entry refused: metadata key "${sensitiveKey}" may carry answers or secrets`,
     );
   }
 

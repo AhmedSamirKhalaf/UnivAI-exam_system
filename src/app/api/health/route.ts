@@ -6,6 +6,7 @@ import {
 import { Exam } from "@/models/Exam";
 import { AUDIT_SCHEMA_VERSION, INTEGRITY_POLICY_VERSION } from "@/lib/audit-log";
 import { loadRateLimitConfig } from "@/lib/rate-limit";
+import { trustedServiceAuthConfigured } from "@/lib/request-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -25,11 +26,25 @@ export async function GET() {
           },
         })
       : null;
+    const serviceAuth = trustedServiceAuthConfigured();
+    if (!serviceAuth) {
+      return Response.json(
+        {
+          ok: true,
+          ready: false,
+          mode: "integrated",
+          mongo: "ready",
+          trusted_service_auth: "unconfigured",
+        },
+        { status: 503 },
+      );
+    }
     return Response.json({
       ok: true,
       ready: true,
       mode: isStandalone() ? "standalone" : "integrated",
       mongo: "ready",
+      trusted_service_auth: "ready",
       seed: isStandalone() ? STANDALONE_SEED_VERSION : null,
       seededScenarios,
       webhook: isStandalone() ? "local capture" : "configured callback",
