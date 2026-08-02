@@ -1,0 +1,22 @@
+{
+  "blueprint_id": "6a6fcca45b7233460416dcba",
+  "schema_version": "publication-receipt-v1",
+  "package_id": "pkg-gq-week1-0001",
+  "plan_version": "2026-v1",
+  "chapter_id": "64b000000000000000000011",
+  "learner_id": "S-2026-000042",
+  "generator_prompt_id": "prompt-gq-w1",
+  "generator_prompt_version": "2026-v1",
+  "question_count": 5,
+  "published_ids": [
+    "gq_q1",
+    "gq_q2",
+    "gq_q3",
+    "gq_q4",
+    "gq_q5"
+  ],
+  "published_at": "2026-08-02T23:18:25.574Z",
+  "idempotent": true,
+  "status": "accepted",
+  "defects": []
+}

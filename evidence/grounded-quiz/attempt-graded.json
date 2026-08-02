@@ -1,0 +1,25 @@
+{
+  "_id": "64b000000000000000000021",
+  "type": "quiz",
+  "title": "Not-started quiz",
+  "taken": true,
+  "integrity_status": "clean",
+  "started_at": "2026-08-02T23:18:25.686Z",
+  "current_question": null,
+  "progress": {
+    "position": 5,
+    "total": 5,
+    "answered": 5
+  },
+  "answer_revision": 5,
+  "can_submit": false,
+  "integrity_state": "submitted",
+  "result": {
+    "grading_status": "auto_graded",
+    "mark": 5,
+    "passing_mark": 3,
+    "passed": true,
+    "integrity_status": "clean",
+    "review_status": "not_required"
+  }
+}
