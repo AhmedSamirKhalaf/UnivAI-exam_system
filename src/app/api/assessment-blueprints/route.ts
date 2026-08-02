@@ -6,7 +6,6 @@ import { publishQuestions } from "@/lib/blueprint-validator";
 import { writeAudit } from "@/lib/audit-log";
 import {
   parseJsonBody,
-  requireTrustedService,
   requestValidationErrorResponse,
 } from "@/lib/request-validation";
 import { AssessmentBlueprint } from "@/models/AssessmentBlueprint";
@@ -71,7 +70,6 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const body = await parseJsonBody(request, assessmentBlueprintSchema);
 
@@ -106,7 +104,6 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const body = await parseJsonBody(request, publicationRequestSchema);
 

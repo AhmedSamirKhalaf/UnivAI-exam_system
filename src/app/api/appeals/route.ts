@@ -3,7 +3,6 @@ import { connectDB } from "@/lib/db";
 import { resolveIntegrityAppeal } from "@/lib/business-logic";
 import {
   parseJsonBody,
-  requireTrustedService,
   requestValidationErrorResponse,
   resolveAppealSchema,
 } from "@/lib/request-validation";
@@ -11,7 +10,6 @@ import { examRateLimiter } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const body = await parseJsonBody(request, resolveAppealSchema);
     examRateLimiter.enforce({ kind: "user", id: body.resolved_by });

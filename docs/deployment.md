@@ -12,7 +12,6 @@ A multi-stage `Dockerfile` produces the production image:
 docker build -t univai-exam:final .
 docker run --rm -p 3200:3200 \
   -e MONGODB_URI=mongodb://host.docker.internal:27017/univai_exams \
-  -e UNIVAI_EXAM_API_TOKEN='replace-with-at-least-32-random-characters' \
   -e RESULT_WEBHOOK_URL=https://univai.example/api/exam-results \
   -e UNIVAI_MODE=integrated \
   univai-exam:final
@@ -38,7 +37,6 @@ with `UNIVAI_` must be treated as secrets where relevant and never committed.
 |---|---|---|
 | `MONGODB_URI` | *(required)* | MongoDB connection string. |
 | `UNIVAI_MODE` | `integrated` | `standalone` (deterministic seed, dev tokens, disabled in production) or `integrated`. |
-| `UNIVAI_EXAM_API_TOKEN` | *(required in integrated mode)* | Bearer token used by the trusted UnivAI backend for state-changing exam, grading, appeal and publication routes. Use at least 32 random characters and never expose it to the browser. |
 | `UNIVAI_STANDALONE_SECRET` | local dev default | HMAC key signing standalone dev tokens. Change it; never deploy the default. |
 | `UNIVAI_EXAM_SEED` | `20260727` | Seed for the standalone deterministic RNG. |
 | `RESULT_WEBHOOK_URL` | empty | Result + proctoring report callback to the UnivAI app. When empty in standalone, payloads are validated and captured in `webhook_captures`. |
@@ -54,7 +52,6 @@ Example `.env.local`:
 ```dotenv
 UNIVAI_MODE=integrated
 MONGODB_URI=mongodb://localhost:27017/univai_exams
-UNIVAI_EXAM_API_TOKEN=replace-with-at-least-32-random-characters
 UNIVAI_APP_URL=http://localhost:3100
 RESULT_WEBHOOK_URL=https://univai.example/api/exam-results
 ```
@@ -65,10 +62,6 @@ RESULT_WEBHOOK_URL=https://univai.example/api/exam-results
   Zod schema (`src/lib/request-validation.ts`). Unknown fields are rejected,
   strings are size-capped, bodies over `512 KiB` are refused, and malformed JSON
   is rejected uniformly.
-- **Trusted caller authentication**: state-changing start, grading, appeal and
-  question-publication routes require `Authorization: Bearer
-  $UNIVAI_EXAM_API_TOKEN` in integrated mode. Standalone development continues
-  to use its signed development identity.
 - **Rate limiting**: per-user and per-session windows enforced in
   `src/lib/rate-limit.ts`; over-limit requests get `429` with a `Retry-After`
   window. Tune via the `UNIVAI_RATE_LIMIT_*` variables above.
@@ -91,7 +84,6 @@ RESULT_WEBHOOK_URL=https://univai.example/api/exam-results
   "ready": true,
   "mode": "integrated",
   "mongo": "ready",
-  "trusted_service_auth": "ready",
   "hardening": {
     "request_validation": "strict-schemas-v1",
     "rate_limits": { "user": { "windowMs": 60000, "max": 30 }, "session": { "windowMs": 60000, "max": 120 } },

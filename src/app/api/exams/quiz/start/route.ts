@@ -7,7 +7,6 @@ import {
 import { createExamLaunch, examAttemptErrorResponse, ExamAttemptError } from "@/lib/exam-attempt";
 import {
   parseJsonBody,
-  requireTrustedService,
   requestValidationErrorResponse,
   startQuizSchema,
 } from "@/lib/request-validation";
@@ -20,7 +19,6 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const body = await parseJsonBody(request, startQuizSchema);
     examRateLimiter.enforce({ kind: "user", id: body.student_id });

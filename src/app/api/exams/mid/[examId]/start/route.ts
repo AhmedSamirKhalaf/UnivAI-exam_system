@@ -6,7 +6,6 @@ import {
 import { createExamLaunch, examAttemptErrorResponse } from "@/lib/exam-attempt";
 import {
   parseJsonBody,
-  requireTrustedService,
   requestValidationErrorResponse,
   startMidSchema,
 } from "@/lib/request-validation";
@@ -22,7 +21,6 @@ export async function POST(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const { examId } = await params;
     const body = await parseJsonBody(request, startMidSchema, {

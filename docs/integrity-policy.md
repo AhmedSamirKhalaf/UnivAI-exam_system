@@ -54,9 +54,9 @@ resolution keeps the invalidation. Resolution is itself audited.
 
 Quiz and midterm grades are computed on the server from the stored question set
 and server-held answers. Final essay marks use the manual `gradeFinal` path,
-which is restricted to an authenticated trusted-service caller and records the
-grader and regrade flag in the audit log. The student browser cannot call that
-path with its exam-attempt token.
+which records the grader and regrade flag in the audit log. Authentication and
+authorization for that operator-only integration remain an upstream deployment
+boundary and must not be delegated to the student browser.
 
 ## Known false-positive limitations
 

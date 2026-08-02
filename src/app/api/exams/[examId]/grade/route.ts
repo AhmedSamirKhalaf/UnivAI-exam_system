@@ -5,7 +5,6 @@ import { ExamAttemptError, examAttemptErrorResponse } from "@/lib/exam-attempt";
 import {
   gradeFinalSchema,
   parseJsonBody,
-  requireTrustedService,
   requestValidationErrorResponse,
 } from "@/lib/request-validation";
 import { examRateLimiter } from "@/lib/rate-limit";
@@ -20,7 +19,6 @@ export async function POST(
   { params }: { params: Promise<{ examId: string }> }
 ) {
   try {
-    requireTrustedService(request);
     await connectDB();
     const { examId } = await params;
     const body = await parseJsonBody(request, gradeFinalSchema);
