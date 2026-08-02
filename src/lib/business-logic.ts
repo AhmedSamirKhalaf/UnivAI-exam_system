@@ -5,6 +5,7 @@ import { ExamChapter } from "@/models/ExamChapter";
 import { Chapter } from "@/models/Chapter";
 import { Curriculum } from "@/models/Curriculum";
 import { Book } from "@/models/Book";
+import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { ProctoringEvent, ProctoringEventType } from "@/models/ProctoringEvent";
 import { ExamSession } from "@/models/ExamSession";
 import { GradeHistory } from "@/models/GradeHistory";
@@ -260,7 +261,7 @@ async function selectAgentBankQuestions(
 }
 
 /* ------------------------------------------------------------------ */
-/*   startQuiz — find-or-reset                                        */
+/*   startQuiz — find-or-reset from the published quiz bank            */
 /* ------------------------------------------------------------------ */
 
 export interface StartResult {
@@ -268,6 +269,31 @@ export interface StartResult {
   created: boolean;
 }
 
+const QUIZ_MIN_COUNT = 3;
+const QUIZ_MAX_COUNT = 30;
+
+function publishedQuestionToSnapshot(
+  question: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    schema_version: "question-provenance-v1",
+    question_id: question.question_id,
+    prompt: question.prompt,
+    type: question.type,
+    options: question.options,
+    correct_option: question.correct_option,
+    plan_version: question.plan_version,
+    approved: true,
+    provenance: question.provenance,
+  };
+}
+
+/**
+ * Draws a quiz exclusively from the published provenance bank
+ * (QuestionProvenance, stamped by a validated QuizPackageV1). There is no
+ * generation and no placeholder fallback here: an empty or short bank is an
+ * explicit start failure, not a license to fabricate questions.
+ */
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
   chapterId: string | mongoose.Types.ObjectId,
@@ -288,22 +314,13 @@ export async function startQuiz(
 
   const title = `Quiz: ${chapter.title}`;
   const now = new Date();
-  // The caller (UnivAI's course-size dial) may scale the paper; pass mark
-  // stays proportional to the original 3-of-5.
-  const questionCount = Math.min(30, Math.max(3, Math.floor(requestedCount ?? 5)));
+  const questionCount = Math.min(QUIZ_MAX_COUNT, Math.max(QUIZ_MIN_COUNT, Math.floor(requestedCount ?? 5)));
   const passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
-  const questions = await selectAgentBankQuestions(
-    chapter._id,
-    questionCount,
-    "quiz"
-  );
-
   let exam: IExam;
 
   if (existing) {
     existing.attempt_number = (existing.attempt_number || 0) + 1;
     if (studentSid) existing.student_sid = studentSid;
-    existing.generated_questions = questions;
     existing.student_answers = [];
     existing.taken = false;
     existing.mark = undefined;
@@ -315,6 +332,20 @@ export async function startQuiz(
     existing.review_status = "not_required";
     existing.invalidated_at = undefined;
     existing.invalidation_notified_at = undefined;
+
+    if (existing.questions_snapshot) {
+      // Reuse the immutable published snapshot so a retake is deterministic
+      // and always grades the same published version.
+      existing.generated_questions = existing.questions_snapshot;
+    } else {
+      // Legacy attempt from before blueprint-backed quizzes: refresh from the
+      // published bank without mutating the immutable snapshot field.
+      const published = await publishedBank(chapterIdObj, studentIdObj, studentSid);
+      existing.generated_questions = samplePublishedBank(published, questionCount).map(
+        (question) => publishedQuestionToSnapshot(question)
+      );
+    }
+
     exam = await existing.save();
 
     await ExamSession.deleteOne({ exam_id: exam._id });
@@ -338,11 +369,28 @@ export async function startQuiz(
         chapter_id: chapterIdObj.toString(),
         attempt_number: exam.attempt_number,
         question_count: questionCount,
+        blueprint_id: exam.blueprint_id?.toString() ?? null,
+        plan_version: exam.plan_version ?? null,
       },
     });
 
     return { exam, created: false };
   }
+
+  const published = await publishedBank(chapterIdObj, studentIdObj, studentSid);
+  const snapshot = samplePublishedBank(published, questionCount).map((question) =>
+    publishedQuestionToSnapshot(question)
+  );
+  const blueprintIds = new Set(
+    published.map((question) =>
+      question.blueprint_id ? String(question.blueprint_id) : undefined,
+    ),
+  );
+  if (blueprintIds.size !== 1 || blueprintIds.has(undefined)) {
+    throw new Error("Published quiz bank spans multiple blueprints");
+  }
+  const blueprintId = published[0].blueprint_id as mongoose.Types.ObjectId;
+  const planVersion = String(published[0].plan_version ?? "");
 
   exam = await Exam.create({
     type: "quiz",
@@ -350,8 +398,11 @@ export async function startQuiz(
     student_id: studentIdObj,
     student_sid: studentSid,
     chapter_id: chapterIdObj,
+    blueprint_id: blueprintId,
+    plan_version: planVersion,
+    questions_snapshot: snapshot,
     attempt_number: 1,
-    generated_questions: questions,
+    generated_questions: snapshot,
     student_answers: [],
     taken: false,
     passing_mark: passingMark,
@@ -372,6 +423,48 @@ export async function startQuiz(
   });
 
   return { exam, created: true };
+}
+
+async function publishedBank(
+  chapterId: mongoose.Types.ObjectId,
+  studentId: mongoose.Types.ObjectId,
+  studentSid?: string,
+): Promise<Record<string, unknown>[]> {
+  const learnerFilter = studentSid
+    ? { $or: [{ learner_id: studentSid }, { learner_id: studentId.toString() }] }
+    : { learner_id: studentId.toString() };
+  const published = await QuestionProvenance.find({
+    chapter_id: chapterId,
+    approved: true,
+    ...learnerFilter,
+  }).lean();
+
+  if (published.length === 0) {
+    throw new Error(
+      "No published quiz questions for this chapter; the weekly quiz package is not available",
+    );
+  }
+  if (published.length < QUIZ_MIN_COUNT) {
+    throw new Error(
+      `Insufficient published quiz bank: ${published.length} available, at least ${QUIZ_MIN_COUNT} required`,
+    );
+  }
+  return published as unknown as Record<string, unknown>[];
+}
+
+function samplePublishedBank(
+  published: Record<string, unknown>[],
+  count: number,
+): Record<string, unknown>[] {
+  if (published.length < count) {
+    throw new Error(
+      `Insufficient published quiz bank: ${published.length} available, ${count} requested`,
+    );
+  }
+  const random = isStandalone()
+    ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
+    : Math.random;
+  return shuffled(published, random).slice(0, count);
 }
 
 /* ------------------------------------------------------------------ */

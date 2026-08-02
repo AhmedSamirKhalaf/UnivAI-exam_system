@@ -1,0 +1,22 @@
+{
+  "blueprint_id": "6a6fcca45b7233460416dcba",
+  "schema_version": "publication-receipt-v1",
+  "package_id": "pkg-gq-week3-corrupt",
+  "plan_version": "2026-v1",
+  "chapter_id": "64b000000000000000000013",
+  "learner_id": "S-2026-000042",
+  "generator_prompt_id": "prompt-gq-w1",
+  "generator_prompt_version": "2026-v1",
+  "question_count": 5,
+  "published_ids": [],
+  "published_at": "2026-08-02T23:18:28.697Z",
+  "idempotent": false,
+  "status": "rejected",
+  "defects": [
+    {
+      "code": "question.page.out_of_range",
+      "path": "package.questions[1].provenance.page_number",
+      "message": "page 99 is outside the approved source ranges"
+    }
+  ]
+}

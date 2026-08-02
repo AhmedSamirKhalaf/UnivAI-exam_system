@@ -30,6 +30,15 @@ export interface IQuestionProvenance extends Document {
   question_hash?: string;
   approved: boolean;
   provenance: IProvenanceSource;
+  // Publication trace (QuizPackageV1): the weekly delivery target and the
+  // agent generator run that produced the question. Optional so documents
+  // published before this sprint remain valid.
+  chapter_id?: mongoose.Types.ObjectId;
+  learner_id?: string;
+  package_id?: string;
+  generator_prompt_id?: string;
+  generator_prompt_version?: string;
+  question_hash?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -89,6 +98,16 @@ const questionProvenanceSchema = new Schema<IQuestionProvenance>(
       section: { type: String, required: true, immutable: true },
       excerpt: { type: String, immutable: true },
     },
+    chapter_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Chapter",
+      immutable: true,
+    },
+    learner_id: { type: String, immutable: true },
+    package_id: { type: String, immutable: true },
+    generator_prompt_id: { type: String, immutable: true },
+    generator_prompt_version: { type: String, immutable: true },
+    question_hash: { type: String, immutable: true },
   },
   { timestamps: true, versionKey: false },
 );
