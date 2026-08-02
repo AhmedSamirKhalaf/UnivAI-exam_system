@@ -20,7 +20,9 @@ Resize/docked-DevTools detection is low confidence, so it cannot invalidate an e
 
 ## Deliberate exclusions
 
-A main-page script runs a small IIFE with a repeated `debugger` statement. The statement is effectively inert without an attached inspector and repeatedly pauses the exam UI when an inspector is listening, including undocked/window-mode DevTools. Resuming execution schedules another pause 1.25 seconds later. Closing DevTools lets the script continue normally.
+A main-page script runs a small IIFE with a repeated `debugger` statement. The statement is effectively inert without an attached inspector and repeatedly pauses the exam UI when an inspector is listening, including undocked/window-mode DevTools. Resuming execution schedules another pause 50 milliseconds later. Closing DevTools lets the script continue normally.
+
+The authenticated integrity socket sends a fresh ensure command and nonce every 500 milliseconds. Each command reloads the small IIFE, while its page-global runtime guard prevents duplicate healthy loops. Removing the script element does not stop code that already ran; manually stopping or deleting its runtime is repaired by the next socket command.
 
 This is only a deterrent: disabling breakpoints can bypass it, and the pause is not treated as proof of misconduct by itself. A held breakpoint also pauses main-thread answer saving and heartbeat activity; already accepted answers remain server-owned, and the existing connection grace and review flow apply. Text selection is not blocked because selection is useful to accessibility tools and is not itself a violation. Continuous pointer movement and raw keystrokes are not collected.
 

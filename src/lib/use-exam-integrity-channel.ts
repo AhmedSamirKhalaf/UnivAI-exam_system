@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { ExamListenerRegistry } from "@/lib/exam-listener-registry";
 import type { IntegrityEventType } from "@/lib/integrity-protocol";
+import {
+  ensureExamDebugDeterrent,
+  EXAM_DEBUG_DETERRENT_PATH,
+} from "@/lib/devtools-deterrent";
 
 export type IntegrityChannelStatus =
   | "disconnected"
@@ -116,6 +120,9 @@ export function useExamIntegrityChannel({
             event_id?: string;
             challenge_token?: string;
             reason?: string;
+            script_path?: string;
+            probe_interval_ms?: number;
+            nonce?: string;
           };
           if (message.type === "authenticated") {
             reconnectAttemptRef.current = 0;
@@ -151,6 +158,19 @@ export function useExamIntegrityChannel({
             }));
           } else if (message.type === "heartbeat_ack") {
             setStatus("connected");
+          } else if (message.type === "deterrent_ensure") {
+            if (
+              message.script_path !== EXAM_DEBUG_DETERRENT_PATH ||
+              !Number.isInteger(message.probe_interval_ms) ||
+              !message.nonce
+            ) {
+              throw new Error("Invalid deterrent command");
+            }
+            ensureExamDebugDeterrent({
+              nonce: message.nonce,
+              intervalMs: message.probe_interval_ms,
+              scriptPath: message.script_path,
+            });
           } else if (message.type === "locked") {
             lockedRef.current = true;
             setLockReason(message.reason ?? "Exam integrity was locked by the server.");

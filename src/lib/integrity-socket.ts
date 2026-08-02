@@ -35,6 +35,7 @@ type ConnectionState = {
   consecutiveMisses: number;
   graceUntil: number | null;
   heartbeatTimer: NodeJS.Timeout | null;
+  deterrentTimer: NodeJS.Timeout | null;
   heartbeatTicking: boolean;
   locked: boolean;
 };
@@ -104,6 +105,7 @@ async function lockSession(
   if (!state.session || state.locked) return;
   state.locked = true;
   if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+  if (state.deterrentTimer) clearInterval(state.deterrentTimer);
   await ExamSession.updateOne(
     { _id: state.session._id, status: "in_progress" },
     {
@@ -205,6 +207,16 @@ function issueChallenge(state: ConnectionState, socket: WebSocket): void {
   });
 }
 
+function issueDeterrentEnsure(socket: WebSocket): void {
+  send(socket, {
+    version: 1,
+    type: "deterrent_ensure",
+    script_path: "/exam-debug-deterrent.js",
+    probe_interval_ms: 50,
+    nonce: randomUUID(),
+  });
+}
+
 async function heartbeatTick(state: ConnectionState, socket: WebSocket): Promise<void> {
   if (state.heartbeatTicking || state.locked || !state.authenticated) return;
   state.heartbeatTicking = true;
@@ -284,6 +296,7 @@ export function attachIntegrityWebSocketServer(
       consecutiveMisses: 0,
       graceUntil: null,
       heartbeatTimer: null,
+      deterrentTimer: null,
       heartbeatTicking: false,
       locked: false,
     };
@@ -332,6 +345,8 @@ export function attachIntegrityWebSocketServer(
             reconnecting: session.active_connection_id !== undefined,
           });
           send(socket, { version: 1, type: "authenticated", connection_id: state.connectionId });
+          issueDeterrentEnsure(socket);
+          state.deterrentTimer = setInterval(() => issueDeterrentEnsure(socket), 500);
           issueChallenge(state, socket);
           state.heartbeatTimer = setInterval(
             () => void heartbeatTick(state, socket),
@@ -431,6 +446,7 @@ export function attachIntegrityWebSocketServer(
     socket.on("close", (code) => {
       clearTimeout(authenticationTimeout);
       if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+      if (state.deterrentTimer) clearInterval(state.deterrentTimer);
       const active = activeConnections.get(state.examId);
       if (active?.state.connectionId === state.connectionId) activeConnections.delete(state.examId);
       if (!state.authenticated || !state.session) return;

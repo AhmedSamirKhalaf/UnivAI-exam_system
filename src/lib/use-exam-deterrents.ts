@@ -7,6 +7,10 @@ import {
   getRestrictedShortcut,
 } from "@/lib/proctoring-signals";
 import type { IntegrityEventType } from "@/lib/integrity-protocol";
+import {
+  ensureExamDebugDeterrent,
+  stopExamDebugDeterrent,
+} from "@/lib/devtools-deterrent";
 
 type SendEvent = (
   type: IntegrityEventType,
@@ -57,14 +61,9 @@ export function useExamDeterrents({
     let devToolsGateActive = false;
     let lastDimensionReportAt = 0;
     const tabId = crypto.randomUUID();
-    let devToolsScript: HTMLScriptElement | null = null;
 
     try {
-      devToolsScript = document.createElement("script");
-      devToolsScript.src = "/exam-debug-deterrent.js";
-      devToolsScript.async = true;
-      devToolsScript.dataset.univaiExamDeterrent = "active";
-      document.head.appendChild(devToolsScript);
+      ensureExamDebugDeterrent({ nonce: crypto.randomUUID() });
     } catch {
       // The other browser deterrents remain active when scripts are unavailable.
     }
@@ -263,8 +262,7 @@ export function useExamDeterrents({
     return () => {
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       window.clearInterval(dimensionInterval);
-      window.dispatchEvent(new Event("univai:stop-debug-deterrent"));
-      devToolsScript?.remove();
+      stopExamDebugDeterrent();
       registry.dispose();
       channel?.close();
       if (registryRef.current === registry) registryRef.current = null;

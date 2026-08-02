@@ -48,13 +48,30 @@ test("a main-page IIFE repeatedly pauses when an inspector is listening", async 
     new URL("../src/lib/use-exam-deterrents.ts", import.meta.url),
     "utf8",
   );
+  const loader = await readFile(
+    new URL("../src/lib/devtools-deterrent.ts", import.meta.url),
+    "utf8",
+  );
+  const channel = await readFile(
+    new URL("../src/lib/use-exam-integrity-channel.ts", import.meta.url),
+    "utf8",
+  );
+  const socket = await readFile(
+    new URL("../src/lib/integrity-socket.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(script, /^\(\(\) => \{/);
   assert.match(script, /\bdebugger;/);
-  assert.match(script, /window\.setTimeout\(pauseWhenInspectorIsListening, 1250\)/);
+  assert.match(script, /: 50;/);
+  assert.match(script, /state\.intervalMs/);
   assert.match(script, /window\.addEventListener\(stopEventName, stop\)/);
-  assert.match(deterrents, /document\.createElement\("script"\)/);
-  assert.match(deterrents, /devToolsScript\.src = "\/exam-debug-deterrent\.js"/);
-  assert.match(deterrents, /window\.dispatchEvent\(new Event\("univai:stop-debug-deterrent"\)\)/);
+  assert.match(loader, /EXAM_DEBUG_PROBE_INTERVAL_MS = 50/);
+  assert.match(loader, /document\.createElement\("script"\)/);
+  assert.match(deterrents, /ensureExamDebugDeterrent/);
+  assert.match(channel, /message\.type === "deterrent_ensure"/);
+  assert.match(channel, /ensureExamDebugDeterrent/);
+  assert.match(socket, /type: "deterrent_ensure"/);
+  assert.match(socket, /setInterval\(\(\) => issueDeterrentEnsure\(socket\), 500\)/);
 });
 
 test("fullscreen changes are reported to the hard exam gate", async () => {
