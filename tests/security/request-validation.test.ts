@@ -101,6 +101,18 @@ describe("request validation", () => {
     expect(body).toEqual({});
   });
 
+  test("validates the legacy student identity on mid-start payloads", async () => {
+    const body = await parseJsonBody(
+      jsonRequest({ student_id: VALID_OBJECT_ID }),
+      startMidSchema,
+    );
+    expect(body.student_id).toBe(VALID_OBJECT_ID);
+
+    await expect(
+      parseJsonBody(jsonRequest({ student_id: "not-an-id" }), startMidSchema),
+    ).rejects.toThrow(RequestValidationError);
+  });
+
   test("rejects oversized bodies", async () => {
     const oversized = "z".repeat(MAX_BODY_BYTES + 1);
     const request = new Request("http://localhost/api/exam", {
@@ -153,6 +165,14 @@ describe("request validation", () => {
       const payload = await response!.json();
       expect(payload.error).toMatch(/Unknown fields are not allowed/);
     }
+  });
+
+  test("validates the legacy student identity on proctoring events", async () => {
+    const body = await parseJsonBody(
+      jsonRequest({ type: "tab_switch", student_id: VALID_OBJECT_ID }),
+      proctoringEventSchema,
+    );
+    expect(body.student_id).toBe(VALID_OBJECT_ID);
   });
 
   test("maps rate limits and idempotency failures to their public statuses", () => {

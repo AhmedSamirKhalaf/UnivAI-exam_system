@@ -5,7 +5,11 @@ import {
   recordDiscreteEvent,
   recordCameraEvent,
 } from "@/lib/business-logic";
-import { examAttemptErrorResponse, requireExamAttempt } from "@/lib/exam-attempt";
+import {
+  ExamAttemptError,
+  examAttemptErrorResponse,
+  requireExamAttempt,
+} from "@/lib/exam-attempt";
 import {
   parseJsonBody,
   proctoringEventSchema,
@@ -25,6 +29,13 @@ export async function POST(
     const session = await requireExamAttempt(request, examId);
     examRateLimiter.enforce({ kind: "session", id: examId });
     const body = await parseJsonBody(request, proctoringEventSchema);
+    if (
+      body.student_id &&
+      session &&
+      session.student_id.toString() !== body.student_id
+    ) {
+      throw new ExamAttemptError("Exam session does not belong to this student", 403);
+    }
 
     if (CAMERA_EVENT_TYPES.includes(body.type)) {
       const exam = await Exam.findById(examId);

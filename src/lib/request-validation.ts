@@ -40,6 +40,7 @@ export const startQuizSchema = z
 
 export const startMidSchema = z
   .object({
+    student_id: objectIdString.optional(),
     question_count: z.number().int().min(5).max(60).optional(),
     student_sid: studentSidString.optional(),
   })
@@ -64,6 +65,7 @@ export const gradeFinalSchema = z
 
 export const proctoringEventSchema = z
   .object({
+    student_id: objectIdString.optional(),
     type: z.enum([
       "no_face",
       "multiple_faces",
