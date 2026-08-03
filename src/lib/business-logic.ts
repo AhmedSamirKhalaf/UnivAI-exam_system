@@ -10,6 +10,7 @@ import { ProctoringEvent, ProctoringEventType } from "@/models/ProctoringEvent";
 import { ExamSession } from "@/models/ExamSession";
 import { GradeHistory } from "@/models/GradeHistory";
 import { IntegrityAppeal } from "@/models/IntegrityAppeal";
+import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { PROCTORING_CONFIG } from "@/lib/proctoring-config";
 import {
   createSeededRandom,
@@ -663,8 +664,64 @@ export async function createMid(
 }
 
 /* ------------------------------------------------------------------ */
-/*   startFinal — one-shot creation                                    */
+/*   startFinal — one-shot creation from the published final bank      */
 /* ------------------------------------------------------------------ */
+
+export const FINAL_MIN_QUESTIONS = 10;
+
+function publishedFinalQuestionToSnapshot(
+  question: Record<string, unknown>,
+): Record<string, unknown> {
+  const isMcq = question.type === "mcq";
+  const snapshot: Record<string, unknown> = {
+    schema_version: "question-provenance-v1",
+    question_id: question.question_id,
+    prompt: question.prompt,
+    type: question.type,
+    plan_version: question.plan_version,
+    approved: true,
+    provenance: question.provenance,
+  };
+  if (isMcq) {
+    snapshot.options = question.options;
+    snapshot.correct_option = question.correct_option;
+  }
+  return snapshot;
+}
+
+/**
+ * Draws the final EXCLUSIVELY from the published cumulative final bank
+ * (QuestionProvenance stamped by a validated FinalPackageV1). There is no
+ * generation and no placeholder fallback: an empty or short bank is an explicit
+ * start failure, not a license to fabricate questions. One final attempt binds
+ * to one immutable published version (the full paper — no random sampling).
+ */
+async function publishedFinalBank(
+  curriculumId: mongoose.Types.ObjectId,
+  studentId: mongoose.Types.ObjectId,
+  studentSid?: string,
+): Promise<Record<string, unknown>[]> {
+  const learnerFilter = studentSid
+    ? { $or: [{ learner_id: studentSid }, { learner_id: studentId.toString() }] }
+    : { learner_id: studentId.toString() };
+  const published = await QuestionProvenance.find({
+    curriculum_id: curriculumId,
+    approved: true,
+    ...learnerFilter,
+  }).lean();
+
+  if (published.length === 0) {
+    throw new Error(
+      "No published final questions for this curriculum; the cumulative final package is not available",
+    );
+  }
+  if (published.length < FINAL_MIN_QUESTIONS) {
+    throw new Error(
+      `Insufficient published final bank: ${published.length} available, at least ${FINAL_MIN_QUESTIONS} required`,
+    );
+  }
+  return published as unknown as Record<string, unknown>[];
+}
 
 export async function startFinal(
   studentId: string | mongoose.Types.ObjectId,
@@ -697,16 +754,36 @@ export async function startFinal(
   const curriculum = await Curriculum.findById(curriculumIdObj);
   if (!curriculum) throw new Error("Curriculum not found");
 
-  const questions = await selectAgentBankQuestions(curriculumIdObj, 10, "final");
+  const published = await publishedFinalBank(
+    curriculumIdObj,
+    studentIdObj,
+    studentSid,
+  );
+  const snapshot = published.map(publishedFinalQuestionToSnapshot);
+
+  const blueprintIds = new Set(
+    published.map((question) =>
+      question.blueprint_id ? String(question.blueprint_id) : undefined,
+    ),
+  );
+  if (blueprintIds.size !== 1 || blueprintIds.has(undefined)) {
+    throw new Error("Published final bank spans multiple blueprints");
+  }
+  const blueprintId = published[0].blueprint_id as mongoose.Types.ObjectId;
+  const planVersion = String(published[0].plan_version ?? "");
   const now = new Date();
 
   const exam = await Exam.create({
     type: "final",
     title: `Final: ${curriculum.title}`,
     student_id: studentIdObj,
+    student_sid: studentSid,
     curriculum_id: curriculumIdObj,
+    blueprint_id: blueprintId,
+    plan_version: planVersion,
+    questions_snapshot: snapshot,
     attempt_number: 1,
-    generated_questions: questions,
+    generated_questions: snapshot,
     student_answers: [],
     taken: false,
     passed: false,
@@ -732,8 +809,10 @@ export async function startFinal(
     metadata: {
       exam_type: "final",
       curriculum_id: curriculumIdObj.toString(),
+      blueprint_id: blueprintId.toString(),
+      plan_version: planVersion,
       attempt_number: exam.attempt_number,
-      question_count: questions.length,
+      question_count: snapshot.length,
     },
   });
 

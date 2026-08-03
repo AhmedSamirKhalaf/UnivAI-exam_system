@@ -199,7 +199,9 @@ examSchema.pre("validate", function validateBlueprintSnapshot() {
     return;
   }
 
-  if (this.taken) {
+  // Auto-grading runs on submit, but a manually graded final is immutable: once
+  // grading_status is "graded" the trusted instructor mark is never recomputed.
+  if (this.taken && this.grading_status !== "graded") {
     try {
       const passingMark =
         this.passing_mark ??
