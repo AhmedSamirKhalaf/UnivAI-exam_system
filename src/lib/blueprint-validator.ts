@@ -85,13 +85,14 @@ export function validateQuestionProvenance(
   const sourceCoverage = blueprint.source_coverage.find(
     (coverage) =>
       coverage.document_id === proposed.provenance.document_id &&
+      coverage.document_title === proposed.provenance.document_title &&
       (coverage.sections.includes("*") ||
         coverage.sections.includes(proposed.provenance.section)),
   );
 
   if (!sourceCoverage) {
     errors.push(
-      `question.provenance: document "${proposed.provenance.document_id}" and section "${proposed.provenance.section}" are not covered by the approved blueprint`,
+      `question.provenance: document "${proposed.provenance.document_id}", title "${proposed.provenance.document_title}", and section "${proposed.provenance.section}" are not covered by the approved blueprint`,
     );
   } else if (
     !pageIsCovered(proposed.provenance.page_number, sourceCoverage.page_ranges)

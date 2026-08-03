@@ -18,6 +18,16 @@ export interface IQuestionProvenance extends Document {
   options?: string[];
   correct_option?: string;
   plan_version: string;
+  package_id?: string;
+  source_ids?: string[];
+  chapter_id?: mongoose.Types.ObjectId;
+  week?: number;
+  objective_ids?: string[];
+  difficulty?: "easy" | "medium" | "hard";
+  integration?: boolean;
+  generator_prompt_id?: string;
+  generator_prompt_version?: string;
+  question_hash?: string;
   approved: boolean;
   provenance: IProvenanceSource;
   createdAt: Date;
@@ -49,6 +59,20 @@ const questionProvenanceSchema = new Schema<IQuestionProvenance>(
     options: [{ type: String, immutable: true }],
     correct_option: { type: String, immutable: true },
     plan_version: { type: String, required: true, immutable: true },
+    package_id: { type: String, immutable: true },
+    source_ids: [{ type: String, immutable: true }],
+    chapter_id: { type: Schema.Types.ObjectId, ref: "Chapter", immutable: true },
+    week: { type: Number, min: 1, immutable: true },
+    objective_ids: [{ type: String, immutable: true }],
+    difficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      immutable: true,
+    },
+    integration: { type: Boolean, immutable: true },
+    generator_prompt_id: { type: String, immutable: true },
+    generator_prompt_version: { type: String, immutable: true },
+    question_hash: { type: String, immutable: true },
     approved: {
       type: Boolean,
       required: true,

@@ -31,12 +31,30 @@ export async function POST(
     const body = await parseJsonBody(request, startMidSchema, {
       allowEmpty: true,
     });
-    if (body.student_id) {
-      const exam = await Exam.findById(examId).select("student_id");
-      if (!exam) throw new ExamAttemptError("Exam not found", 404);
-      if (exam.student_id.toString() !== body.student_id) {
-        throw new ExamAttemptError("Exam does not belong to this student", 403);
-      }
+    if (!body.student_id) {
+      throw new ExamAttemptError("Authenticated student_id is required", 401);
+    }
+    const exam = await Exam.findById(examId).select(
+      "student_id published_midterm_id questions_snapshot taken",
+    );
+    if (!exam) throw new ExamAttemptError("Exam not found", 404);
+    if (exam.student_id.toString() !== body.student_id) {
+      throw new ExamAttemptError("Exam does not belong to this student", 403);
+    }
+    if (!exam.published_midterm_id || !exam.questions_snapshot?.length) {
+      throw new ExamAttemptError("Midterm is not published", 409);
+    }
+    if (exam.taken) {
+      throw new ExamAttemptError("Midterm attempt is already finalized", 409);
+    }
+    if (
+      body.question_count !== undefined &&
+      body.question_count !== exam.questions_snapshot.length
+    ) {
+      throw new ExamAttemptError(
+        "question_count cannot change an immutable published midterm",
+        409,
+      );
     }
     examRateLimiter.enforce({ kind: "session", id: examId });
 
