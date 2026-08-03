@@ -55,7 +55,7 @@ async function seedPublishedQuestionBanks(
   const now = new Date();
   for (const [chapterIndex, chapterId] of chapterIds.entries()) {
     await legacyCollection.updateOne(
-      { chapter_id: new mongoose.Types.ObjectId(chapterId) },
+      { chapter_id: chapterId },
       {
         $set: {
           seed_version: "ci-final-bank-v1",
