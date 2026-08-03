@@ -13,6 +13,11 @@ const modelMocks = vi.hoisted(() => ({
   insertProvenance: vi.fn(),
 }));
 
+const transactionSession = {
+  withTransaction: vi.fn(async (work: () => Promise<void>) => work()),
+  endSession: vi.fn(async () => undefined),
+};
+
 function leanProvenance(value: unknown[]) {
   return { lean: vi.fn().mockResolvedValue(value) };
 }
@@ -292,6 +297,7 @@ describe("publishQuizPackage persistence and idempotency", () => {
     vi.clearAllMocks();
     modelMocks.findProvenance.mockReturnValue(leanProvenance([]));
     modelMocks.insertProvenance.mockImplementation(async (docs) => docs);
+    vi.spyOn(mongoose, "startSession").mockResolvedValue(transactionSession as never);
   });
 
   test("persists an accepted package with full publication trace", async () => {

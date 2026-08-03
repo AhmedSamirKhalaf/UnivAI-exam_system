@@ -315,7 +315,7 @@ export async function startQuiz(
   const title = `Quiz: ${chapter.title}`;
   const now = new Date();
   const questionCount = Math.min(QUIZ_MAX_COUNT, Math.max(QUIZ_MIN_COUNT, Math.floor(requestedCount ?? 5)));
-  const passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
+  let passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
   let exam: IExam;
 
   if (existing) {
@@ -337,6 +337,7 @@ export async function startQuiz(
       // Reuse the immutable published snapshot so a retake is deterministic
       // and always grades the same published version.
       existing.generated_questions = existing.questions_snapshot;
+      passingMark = Math.max(1, Math.ceil(existing.questions_snapshot.length * 0.6));
     } else {
       // Legacy attempt from before blueprint-backed quizzes: refresh from the
       // published bank without mutating the immutable snapshot field.
