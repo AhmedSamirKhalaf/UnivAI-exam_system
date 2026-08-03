@@ -33,12 +33,7 @@ export interface IQuestionProvenance extends Document {
   // Publication trace (QuizPackageV1): the weekly delivery target and the
   // agent generator run that produced the question. Optional so documents
   // published before this sprint remain valid.
-  chapter_id?: mongoose.Types.ObjectId;
   learner_id?: string;
-  package_id?: string;
-  generator_prompt_id?: string;
-  generator_prompt_version?: string;
-  question_hash?: string;
   createdAt: Date;
   updatedAt: Date;
 }

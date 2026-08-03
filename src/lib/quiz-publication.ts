@@ -565,8 +565,15 @@ export async function publishQuizPackage(
     ...question,
   }));
 
+  const session = await mongoose.startSession();
   try {
-    const inserted = await QuestionProvenance.insertMany(docs, { ordered: true });
+    let inserted: Awaited<ReturnType<typeof QuestionProvenance.insertMany>> = [];
+    await session.withTransaction(async () => {
+      inserted = await QuestionProvenance.insertMany(docs, {
+        ordered: true,
+        session,
+      });
+    });
     return {
       ...base,
       status: "accepted",
@@ -605,5 +612,7 @@ export async function publishQuizPackage(
       };
     }
     throw error;
+  } finally {
+    await session.endSession();
   }
 }
