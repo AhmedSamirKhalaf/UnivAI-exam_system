@@ -43,23 +43,65 @@ function hashValue(value) {
     .digest("hex");
 }
 
-async function seedAgentQuestionBanks(chapterIds) {
-  const collection = mongoose.connection.collection("question_banks");
+async function seedPublishedQuestionBanks(
+  chapterIds,
+  blueprintId,
+  curriculumId,
+  learnerId,
+  planVersion
+) {
+  const collection = mongoose.connection.collection("questionprovenances");
+  const now = new Date();
   for (const [chapterIndex, chapterId] of chapterIds.entries()) {
-    const questions = Array.from({ length: 12 }, (_, questionIndex) => ({
-      question_id: `ci-bank-${chapterIndex + 1}-${questionIndex + 1}`,
+    const questions = Array.from({ length: 5 }, (_, questionIndex) => ({
+      blueprint_id: new mongoose.Types.ObjectId(blueprintId),
+      chapter_id: new mongoose.Types.ObjectId(chapterId),
+      learner_id: learnerId,
+      package_id: `ci-quiz-package-${chapterIndex + 1}`,
+      schema_version: "question-provenance-v1",
+      question_id: `ci-quiz-${chapterIndex + 1}-${questionIndex + 1}`,
       prompt: `Agent supplied question ${chapterIndex + 1}-${questionIndex + 1}`,
       type: "mcq",
       options: ["A", "B", "C", "D"],
       correct_option: "A",
-      source: "lecture",
+      plan_version: planVersion,
+      approved: true,
+      provenance: {
+        document_id: "ci-course-notes-v1",
+        document_title: "CI Course Notes",
+        page_number: chapterIndex + 1,
+        section: `Week ${chapterIndex + 1}`,
+      },
+      createdAt: now,
+      updatedAt: now,
     }));
-    await collection.updateOne(
-      { chapter_id: chapterId },
-      { $set: { seed_version: "ci-agent-bank-v1", questions } },
-      { upsert: true }
-    );
+    await collection.insertMany(questions);
   }
+
+  await collection.insertMany(
+    Array.from({ length: 10 }, (_, index) => ({
+      blueprint_id: new mongoose.Types.ObjectId(blueprintId),
+      curriculum_id: new mongoose.Types.ObjectId(curriculumId),
+      learner_id: learnerId,
+      package_id: "ci-final-package-v1",
+      schema_version: "question-provenance-v1",
+      question_id: `ci-final-${index + 1}`,
+      prompt: `Grounded cumulative final question ${index + 1}`,
+      type: "mcq",
+      options: ["A", "B", "C", "D"],
+      correct_option: "A",
+      plan_version: planVersion,
+      approved: true,
+      provenance: {
+        document_id: "ci-course-notes-v1",
+        document_title: "CI Course Notes",
+        page_number: index + 1,
+        section: `Week ${(index % chapterIds.length) + 1}`,
+      },
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
 }
 
 function buildMidtermPackage({ blueprintId, curriculumId, chapterIds, planVersion }) {
@@ -402,7 +444,6 @@ async function main() {
   let midtermBlueprintId = null;
   let midtermPlanVersion = null;
   if (curriculumId && chapterIds.length > 0) {
-    await seedAgentQuestionBanks(chapterIds);
     midtermBlueprintId = new mongoose.Types.ObjectId().toString();
     midtermPlanVersion = `ci-plan-${ts}`;
     const outcomes = chapterIds.map((_, index) => `week-${index + 1}-objective`);
@@ -430,7 +471,14 @@ async function main() {
       createdAt: now,
       updatedAt: now,
     });
-    console.log("    Agent question banks and approved blueprint seeded");
+    await seedPublishedQuestionBanks(
+      chapterIds,
+      midtermBlueprintId,
+      curriculumId,
+      aliceId,
+      midtermPlanVersion
+    );
+    console.log("    Published quiz/final fixtures and approved blueprint seeded");
   }
 
   const submittedQuizzes = [];
