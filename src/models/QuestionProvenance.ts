@@ -93,16 +93,7 @@ const questionProvenanceSchema = new Schema<IQuestionProvenance>(
       section: { type: String, required: true, immutable: true },
       excerpt: { type: String, immutable: true },
     },
-    chapter_id: {
-      type: Schema.Types.ObjectId,
-      ref: "Chapter",
-      immutable: true,
-    },
     learner_id: { type: String, immutable: true },
-    package_id: { type: String, immutable: true },
-    generator_prompt_id: { type: String, immutable: true },
-    generator_prompt_version: { type: String, immutable: true },
-    question_hash: { type: String, immutable: true },
   },
   { timestamps: true, versionKey: false },
 );
