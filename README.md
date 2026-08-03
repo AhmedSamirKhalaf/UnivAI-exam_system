@@ -58,6 +58,35 @@ RNG only in standalone mode. At most 10% of a paper comes from
 `contracts/result-webhook.example.json` is the canonical consumer example.
 Submission remains durable when webhook delivery fails.
 
+## Exam attempt policy
+
+Attempt limits and cooldowns are enforced by the Exam server, never by the
+client. The source of truth is `src/lib/exam-attempt-policy.ts`; the versioned
+table (`univai-exam-attempt-policy-v1`) is:
+
+| Assessment | Maximum attempts | Minimum wait before next attempt |
+|---|---|---|
+| Quiz | 2 | 3 hours |
+| Midterm | 3 | 5 hours |
+| Final | 2 | 2 days (48 hours) |
+
+Every issued attempt appends one immutable record to the
+`examattemptrecords` ledger (`src/models/ExamAttemptRecord.ts`). A unique
+compound index on `(learner_id, assessment_type, assessment_id,
+previous_attempt_number)` makes concurrent starts atomic: two simultaneous
+requests that evaluate from the same ledger state can create at most one next
+attempt, so a race can never mint a phantom higher-numbered attempt. A timed
+out or closed attempt is never refunded — only the server clock (or an
+explicit terminal state) can make the next attempt eligible.
+
+Start endpoints return the typed policy snapshot so the UI can display the
+limits, the remaining attempts, and the exact next eligible time before the
+exam starts. Failure responses use a stable contract: `409
+attempt_active`, `429 cooldown` (with `Retry-After` and `next_attempt_at`),
+`403 exhausted`, and `400 unknown_assessment_type` (unknown types fail
+closed). The readiness and blocked screens in `src/app/exam/[examId]/` render
+this snapshot directly.
+
 This repository is mounted as a Git submodule. Merge changes here first, then
 update the main UnivAI gitlink. Local submodule changes are not automatically
 included in the main repository commit.

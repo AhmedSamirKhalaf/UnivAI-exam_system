@@ -1,0 +1,25 @@
+{
+  "_id": "6a709bf10fc57178a66ba99c",
+  "type": "final",
+  "title": "Final: Standalone Evidence Course",
+  "taken": true,
+  "integrity_status": "clean",
+  "started_at": "2026-08-03T13:47:29.223Z",
+  "current_question": null,
+  "progress": {
+    "position": 12,
+    "total": 12,
+    "answered": 12
+  },
+  "answer_revision": 12,
+  "can_submit": false,
+  "integrity_state": "submitted",
+  "result": {
+    "grading_status": "pending_review",
+    "mark": 8,
+    "passing_mark": 8,
+    "passed": false,
+    "integrity_status": "clean",
+    "review_status": "not_required"
+  }
+}

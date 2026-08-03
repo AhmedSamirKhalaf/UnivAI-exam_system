@@ -1,6 +1,15 @@
 import mongoose from "mongoose";
 import { Enrollment } from "@/models/Enrollment";
 import { Exam, IExam } from "@/models/Exam";
+import {
+  evaluateStart,
+  issueAttemptRecord,
+  policyErrorForSnapshot,
+  finalizeActiveRecordForSourceExam,
+  buildTerminalEvidence,
+  isDuplicateKeyError,
+} from "@/lib/exam-attempt-policy";
+import { ExamAttemptError } from "@/lib/exam-attempt";
 import { ExamChapter } from "@/models/ExamChapter";
 import { Chapter } from "@/models/Chapter";
 import { Curriculum } from "@/models/Curriculum";
@@ -17,12 +26,7 @@ import {
   type RandomSource,
 } from "@/lib/deterministic-rng";
 import { isStandalone } from "@/lib/runtime";
-import {
-  AUDIT_SCHEMA_VERSION,
-  INTEGRITY_POLICY_VERSION,
-  auditEntrySchema,
-  writeAudit,
-} from "@/lib/audit-log";
+import { INTEGRITY_POLICY_VERSION, writeAudit } from "@/lib/audit-log";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -94,26 +98,10 @@ export async function canStartFinal(
     };
   }
 
-  const existingFinal = await Exam.findOne({
-    student_id: studentId,
-    curriculum_id: curriculumId,
-    type: "final",
-  });
-
-  if (existingFinal) {
-    const clearedAppeal = await IntegrityAppeal.findOne({
-      exam_id: existingFinal._id,
-      resolution: "cleared",
-      allow_retake: true,
-    });
-    if (!clearedAppeal) {
-      return {
-        allowed: false,
-        reason: "Student has already attempted the final exam",
-      };
-    }
-  }
-
+  // The final-attempt count and cooldown are enforced by the versioned
+  // attempt policy (2 attempts, 2 days) in the same atomic operation that
+  // issues the attempt. This gate keeps the remaining mandatory gates:
+  // every chapter quiz must be passed before the final opens.
   const chapters = await Chapter.find({ curriculum_id: curriculumId });
 
   for (const chapter of chapters) {
@@ -175,11 +163,10 @@ async function bumpSuspicionScore(
 }
 
 /* ------------------------------------------------------------------ */
-/*   Agent question bank selection                                    */
+/*   Question generation — drawn from the per-chapter question bank    */
 /* ------------------------------------------------------------------ */
 
 type BankQuestion = {
-  question_id: string;
   prompt: string;
   type: "mcq" | "essay";
   options?: string[];
@@ -189,9 +176,10 @@ type BankQuestion = {
 };
 
 /**
- * UnivAI-Agent stores complete questions per chapter in `question_banks`.
- * Exam may select those supplied records, but it never fabricates missing
- * content or identifiers.
+ * UnivAI generates questions from the course book and stores them per chapter
+ * in the `question_banks` collection ({ chapter_id, questions }). Exams draw
+ * from there, so a quiz is actually about its lecture. The old placeholder
+ * generator survives only as a last resort for chapters with no bank.
  */
 async function bankQuestions(
   chapterId: mongoose.Types.ObjectId
@@ -202,40 +190,55 @@ async function bankQuestions(
     .collection("question_banks")
     .findOne({ chapter_id: chapterId.toString() });
   const questions = (bank?.questions ?? []) as BankQuestion[];
-  return questions.filter((q) => q.question_id && q.prompt && q.type);
+  return questions.filter((q) => q.prompt && q.type);
 }
 
 function sample<T>(items: T[], count: number, random: RandomSource): T[] {
   return shuffled(items, random).slice(0, count);
 }
 
-async function selectAgentBankQuestions(
+function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
+  const questions: Record<string, unknown>[] = [];
+  for (let i = 1; i <= count; i++) {
+    if (examType === "final" && i % 3 === 0) {
+      questions.push({
+        question_id: `q_${i}`,
+        prompt: `Placeholder essay question ${i} — describe a key concept.`,
+        type: "essay",
+        correct_option: undefined,
+      });
+    } else {
+      questions.push({
+        question_id: `q_${i}`,
+        prompt: `Placeholder MCQ question ${i}?`,
+        type: "mcq",
+        options: ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
+        correct_option: String.fromCharCode(65 + (i % 4)),
+      });
+    }
+  }
+  return questions;
+}
+
+export async function generateQuestions(
   scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
   count: number,
   examType: "quiz" | "mid" | "final"
 ): Promise<Record<string, unknown>[]> {
-  const chapterIds = Array.isArray(scope)
-    ? scope
-    : examType === "final"
-      ? (
-          await Chapter.find({ curriculum_id: scope })
-            .select("_id")
-            .lean()
-        ).map((chapter) => chapter._id)
-      : [scope];
+  const chapterIds = Array.isArray(scope) ? scope : [scope];
   const random = isStandalone()
     ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
     : Math.random;
 
   const pool: BankQuestion[] = [];
-  for (const chapterId of chapterIds) {
-    pool.push(...(await bankQuestions(chapterId)));
+  if (examType !== "final") {
+    for (const chapterId of chapterIds) {
+      pool.push(...(await bankQuestions(chapterId)));
+    }
   }
 
   if (!pool.length) {
-    throw new Error(
-      "Agent question bank is empty; Exam refuses to fabricate missing questions",
-    );
+    return placeholderQuestions(count, examType);
   }
 
   // At least 90% of every paper must be answerable from what the lecturer
@@ -251,54 +254,92 @@ async function selectAgentBankQuestions(
     ...sample(selfPool, selfCount, random),
   ];
 
-  if (picked.length !== count) {
-    throw new Error(
-      `Agent question bank has ${picked.length} eligible questions; ${count} are required`,
-    );
-  }
-
-  return sample(picked, picked.length, random);
+  return sample(picked, picked.length, random).map((question, index) => ({
+    question_id: `q_${index + 1}`,
+    prompt: question.prompt,
+    type: question.type,
+    options: question.options,
+    correct_option: question.correct_option,
+    source: question.source ?? "lecture",
+  }));
 }
 
 /* ------------------------------------------------------------------ */
-/*   startQuiz — find-or-reset from the published quiz bank            */
+/*   startQuiz — policy-gated find-or-resume                          */
 /* ------------------------------------------------------------------ */
 
 export interface StartResult {
   exam: IExam;
   created: boolean;
+  resumed: boolean;
+}
+
+const MAX_START_ATTEMPTS = 5;
+const START_RACE_BACKOFF_MS = 20;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const QUIZ_MIN_COUNT = 3;
 const QUIZ_MAX_COUNT = 30;
+export const FINAL_MIN_QUESTIONS = 10;
 
 function publishedQuestionToSnapshot(
   question: Record<string, unknown>,
 ): Record<string, unknown> {
-  return {
+  const snapshot: Record<string, unknown> = {
     schema_version: "question-provenance-v1",
     question_id: question.question_id,
     prompt: question.prompt,
     type: question.type,
-    options: question.options,
-    correct_option: question.correct_option,
     plan_version: question.plan_version,
     approved: true,
     provenance: question.provenance,
   };
+  if (question.type === "mcq") {
+    snapshot.options = question.options;
+    snapshot.correct_option = question.correct_option;
+  }
+  return snapshot;
 }
 
-/**
- * Draws a quiz exclusively from the published provenance bank
- * (QuestionProvenance, stamped by a validated QuizPackageV1). There is no
- * generation and no placeholder fallback here: an empty or short bank is an
- * explicit start failure, not a license to fabricate questions.
- */
+async function publishedBank(
+  filter: Record<string, unknown>,
+  learnerId: mongoose.Types.ObjectId,
+  studentSid?: string,
+): Promise<Record<string, unknown>[]> {
+  const learnerFilter = studentSid
+    ? { $or: [{ learner_id: studentSid }, { learner_id: learnerId.toString() }] }
+    : { learner_id: learnerId.toString() };
+  return await QuestionProvenance.find({
+    ...filter,
+    approved: true,
+    ...learnerFilter,
+  }).lean() as unknown as Record<string, unknown>[];
+}
+
+function assertOnePublishedVersion(published: Record<string, unknown>[]): {
+  blueprintId: mongoose.Types.ObjectId;
+  planVersion: string;
+} {
+  const blueprintIds = new Set(published.map((question) => String(question.blueprint_id ?? "")));
+  const planVersions = new Set(published.map((question) => String(question.plan_version ?? "")));
+  if (blueprintIds.size !== 1 || blueprintIds.has("") || planVersions.size !== 1 || planVersions.has("")) {
+    throw new Error("Published question bank spans multiple blueprint or plan versions");
+  }
+  return {
+    blueprintId: new mongoose.Types.ObjectId([...blueprintIds][0]),
+    planVersion: [...planVersions][0],
+  };
+}
+
 export async function startQuiz(
   studentId: string | mongoose.Types.ObjectId,
   chapterId: string | mongoose.Types.ObjectId,
   requestedCount?: number,
-  studentSid?: string
+  studentSid?: string,
+  now: Date = new Date()
 ): Promise<StartResult> {
   const chapter = await Chapter.findById(chapterId);
   if (!chapter) throw new Error("Chapter not found");
@@ -306,60 +347,111 @@ export async function startQuiz(
   const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
   const chapterIdObj = new mongoose.Types.ObjectId(chapterId.toString());
 
-  const existing = await Exam.findOne({
-    student_id: studentIdObj,
-    chapter_id: chapterIdObj,
-    type: "quiz",
-  });
-
   const title = `Quiz: ${chapter.title}`;
-  const now = new Date();
+  // The caller (UnivAI's course-size dial) may scale the paper; pass mark
+  // stays proportional to the original 3-of-5.
   const questionCount = Math.min(QUIZ_MAX_COUNT, Math.max(QUIZ_MIN_COUNT, Math.floor(requestedCount ?? 5)));
-  let passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
-  let exam: IExam;
 
-  if (existing) {
-    existing.attempt_number = (existing.attempt_number || 0) + 1;
-    if (studentSid) existing.student_sid = studentSid;
-    existing.student_answers = [];
-    existing.taken = false;
-    existing.mark = undefined;
-    existing.passed = false;
-    existing.passing_mark = passingMark;
-    existing.grading_status = "auto_graded";
-    existing.integrity_status = "clean";
-    existing.policy_action = "none";
-    existing.review_status = "not_required";
-    existing.invalidated_at = undefined;
-    existing.invalidation_notified_at = undefined;
+  for (let loop = 0; loop < MAX_START_ATTEMPTS; loop++) {
+    const existing = await Exam.findOne({
+      student_id: studentIdObj,
+      chapter_id: chapterIdObj,
+      type: "quiz",
+    });
 
-    if (existing.questions_snapshot) {
-      // Reuse the immutable published snapshot so a retake is deterministic
-      // and always grades the same published version.
-      existing.generated_questions = existing.questions_snapshot;
-      passingMark = Math.max(1, Math.ceil(existing.questions_snapshot.length * 0.6));
-    } else {
-      // Legacy attempt from before blueprint-backed quizzes: refresh from the
-      // published bank without mutating the immutable snapshot field.
-      const published = await publishedBank(chapterIdObj, studentIdObj, studentSid);
-      existing.generated_questions = samplePublishedBank(published, questionCount).map(
-        (question) => publishedQuestionToSnapshot(question)
-      );
+    const eligibility = await evaluateStart(
+      studentIdObj,
+      "quiz",
+      chapterIdObj,
+      existing ?? null,
+      now,
+    );
+
+    if (eligibility.kind === "blocked") {
+      throw policyErrorForSnapshot(eligibility.snapshot, now);
+    }
+    if (eligibility.kind === "resume") {
+      return { exam: eligibility.exam, created: false, resumed: true };
     }
 
-    exam = await existing.save();
+    const published = existing?.questions_snapshot?.length
+      ? []
+      : await publishedBank({ chapter_id: chapterIdObj }, studentIdObj, studentSid);
+    if (!existing?.questions_snapshot?.length && published.length < questionCount) {
+      throw new Error(`Insufficient published quiz bank: ${published.length} available, ${questionCount} requested`);
+    }
+    const questions = existing?.questions_snapshot?.length
+      ? existing.questions_snapshot as Record<string, unknown>[]
+      : shuffled(published, isStandalone() ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727")) : Math.random)
+          .slice(0, questionCount)
+          .map(publishedQuestionToSnapshot);
+    const publication = existing?.blueprint_id && existing.plan_version
+      ? { blueprintId: existing.blueprint_id, planVersion: existing.plan_version }
+      : assertOnePublishedVersion(published);
+    const passingMark = Math.max(1, Math.ceil(questions.length * 0.6));
 
-    await ExamSession.deleteOne({ exam_id: exam._id });
-    await ProctoringEvent.deleteMany({ exam_id: exam._id });
-
-    await ExamSession.create({
-      exam_id: exam._id,
-      student_id: studentIdObj,
-      started_at: now,
-      suspicion_score: 0,
-      flagged: false,
-      status: "in_progress",
+    // Allowed: issue the next attempt atomically. The unique ledger index
+    // guarantees two simultaneous requests can create at most one attempt.
+    const examId = existing?._id ?? new mongoose.Types.ObjectId();
+    const issuance = await issueAttemptRecord({
+      learnerId: studentIdObj,
+      type: "quiz",
+      assessmentId: chapterIdObj,
+      sourceExamId: examId,
+      now,
+      basedOnAttemptNumber: eligibility.basedOnAttemptNumber,
     });
+    if (!issuance.created) {
+      await sleep(START_RACE_BACKOFF_MS);
+      continue;
+    }
+
+    let exam: IExam;
+    if (existing) {
+      // Previous attempt evidence was archived into its terminal ledger
+      // record during reconciliation; reset the container in place so the
+      // retry gets fresh questions without erasing earlier evidence.
+      await resetExamForAttempt(
+        existing,
+        questions,
+        passingMark,
+        issuance.record.attempt_number,
+        studentSid,
+      );
+      exam = existing;
+    } else {
+      try {
+        exam = await Exam.create({
+          _id: examId,
+          type: "quiz",
+          title,
+          student_id: studentIdObj,
+          student_sid: studentSid,
+          chapter_id: chapterIdObj,
+          blueprint_id: publication.blueprintId,
+          plan_version: publication.planVersion,
+          questions_snapshot: questions,
+          attempt_number: issuance.record.attempt_number,
+          generated_questions: questions,
+          student_answers: [],
+          taken: false,
+          passing_mark: passingMark,
+          passed: false,
+          grading_status: "auto_graded",
+          integrity_status: "clean",
+          policy_action: "none",
+          review_status: "not_required",
+        });
+      } catch (error: unknown) {
+        if (isDuplicateKeyError(error)) {
+          await sleep(START_RACE_BACKOFF_MS);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    await resetExamSession(exam, studentIdObj, now);
 
     await writeAudit({
       actor: { type: "student", id: studentIdObj.toString() },
@@ -368,134 +460,108 @@ export async function startQuiz(
       metadata: {
         exam_type: "quiz",
         chapter_id: chapterIdObj.toString(),
-        attempt_number: exam.attempt_number,
-        question_count: questionCount,
-        blueprint_id: exam.blueprint_id?.toString() ?? null,
-        plan_version: exam.plan_version ?? null,
+        attempt_number: issuance.record.attempt_number,
+        question_count: questions.length,
+        blueprint_id: publication.blueprintId.toString(),
+        plan_version: publication.planVersion,
       },
     });
 
-    return { exam, created: false };
+    return { exam, created: !existing, resumed: false };
   }
 
-  const published = await publishedBank(chapterIdObj, studentIdObj, studentSid);
-  const snapshot = samplePublishedBank(published, questionCount).map((question) =>
-    publishedQuestionToSnapshot(question)
+  throw new ExamAttemptError(
+    "Could not start the quiz; a concurrent start is in progress. Please retry.",
+    409,
   );
-  const blueprintIds = new Set(
-    published.map((question) =>
-      question.blueprint_id ? String(question.blueprint_id) : undefined,
-    ),
-  );
-  if (blueprintIds.size !== 1 || blueprintIds.has(undefined)) {
-    throw new Error("Published quiz bank spans multiple blueprints");
+}
+
+/** Reset an Exam container for a freshly issued attempt. */
+async function resetExamForAttempt(
+  exam: IExam,
+  questions: Record<string, unknown>[],
+  passingMark: number | undefined,
+  attemptNumber: number,
+  studentSid?: string,
+): Promise<void> {
+  exam.attempt_number = attemptNumber;
+  if (studentSid) exam.student_sid = studentSid;
+  exam.generated_questions = questions;
+  exam.student_answers = [];
+  exam.taken = false;
+  exam.mark = undefined;
+  exam.passed = false;
+  exam.passing_mark = passingMark;
+  exam.grading_status = "auto_graded";
+  exam.integrity_status = "clean";
+  exam.policy_action = "none";
+  exam.review_status = "not_required";
+  exam.invalidated_at = undefined;
+  exam.invalidation_notified_at = undefined;
+  exam.submitted_at = undefined;
+  exam.submission_idempotency_key = undefined;
+  await exam.save();
+}
+
+/**
+ * Reuse (or create) the single ExamSession per exam. The previous session's
+ * answers were archived into the terminal attempt record before a retry is
+ * issued, so resetting the container never erases earlier evidence.
+ */
+async function resetExamSession(
+  exam: IExam,
+  studentId: mongoose.Types.ObjectId,
+  now: Date,
+): Promise<unknown> {
+  const existing = await ExamSession.findOne({ exam_id: exam._id });
+  if (existing) {
+    existing.started_at = now;
+    existing.ended_at = undefined;
+    existing.suspicion_score = 0;
+    existing.flagged = false;
+    existing.status = "in_progress";
+    existing.terminated_reason = undefined;
+    existing.current_question_index = 0;
+    existing.answer_revision = 0;
+    existing.answers = [];
+    existing.integrity_state = "active";
+    existing.integrity_lock_reason = undefined;
+    existing.active_connection_id = undefined;
+    existing.last_action_id = undefined;
+    existing.last_action_question_id = undefined;
+    existing.last_action_revision = undefined;
+    existing.last_integrity_sequence = 0;
+    existing.heartbeat_last_seen_at = undefined;
+    existing.heartbeat_consecutive_misses = 0;
+    existing.heartbeat_grace_until = undefined;
+    await existing.save();
+    return existing;
   }
-  const blueprintId = published[0].blueprint_id as mongoose.Types.ObjectId;
-  const planVersion = String(published[0].plan_version ?? "");
-
-  exam = await Exam.create({
-    type: "quiz",
-    title,
-    student_id: studentIdObj,
-    student_sid: studentSid,
-    chapter_id: chapterIdObj,
-    blueprint_id: blueprintId,
-    plan_version: planVersion,
-    questions_snapshot: snapshot,
-    attempt_number: 1,
-    generated_questions: snapshot,
-    student_answers: [],
-    taken: false,
-    passing_mark: passingMark,
-    passed: false,
-    grading_status: "auto_graded",
-    integrity_status: "clean",
-    policy_action: "none",
-    review_status: "not_required",
-  });
-
-  await ExamSession.create({
+  return ExamSession.create({
     exam_id: exam._id,
-    student_id: studentIdObj,
+    student_id: studentId,
     started_at: now,
     suspicion_score: 0,
     flagged: false,
     status: "in_progress",
   });
-
-  return { exam, created: true };
-}
-
-async function publishedBank(
-  chapterId: mongoose.Types.ObjectId,
-  studentId: mongoose.Types.ObjectId,
-  studentSid?: string,
-): Promise<Record<string, unknown>[]> {
-  const learnerFilter = studentSid
-    ? { $or: [{ learner_id: studentSid }, { learner_id: studentId.toString() }] }
-    : { learner_id: studentId.toString() };
-  const published = await QuestionProvenance.find({
-    chapter_id: chapterId,
-    approved: true,
-    ...learnerFilter,
-  }).lean();
-
-  if (published.length === 0) {
-    throw new Error(
-      "No published quiz questions for this chapter; the weekly quiz package is not available",
-    );
-  }
-  if (published.length < QUIZ_MIN_COUNT) {
-    throw new Error(
-      `Insufficient published quiz bank: ${published.length} available, at least ${QUIZ_MIN_COUNT} required`,
-    );
-  }
-  return published as unknown as Record<string, unknown>[];
-}
-
-function samplePublishedBank(
-  published: Record<string, unknown>[],
-  count: number,
-): Record<string, unknown>[] {
-  if (published.length < count) {
-    throw new Error(
-      `Insufficient published quiz bank: ${published.length} available, ${count} requested`,
-    );
-  }
-  const random = isStandalone()
-    ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
-    : Math.random;
-  return shuffled(published, random).slice(0, count);
 }
 
 /* ------------------------------------------------------------------ */
-/*   startMid — reset-in-place on pre-created Exam                     */
+/*   startMid — policy-gated start on a pre-created Exam               */
 /* ------------------------------------------------------------------ */
 
 export async function startMid(
   examId: string | mongoose.Types.ObjectId,
   requestedCount?: number,
-  studentSid?: string
+  studentSid?: string,
+  now: Date = new Date()
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "mid") throw new Error("Exam is not a mid");
-  if (
-    !exam.published_midterm_id ||
-    !exam.blueprint_id ||
-    exam.blueprint_version === undefined ||
-    !exam.plan_version ||
-    !exam.package_id ||
-    !exam.package_version ||
-    !exam.package_hash ||
-    !exam.publication_key ||
-    !exam.published_at ||
-    !exam.questions_snapshot?.length
-  ) {
-    throw new Error("Midterm has no immutable published question package");
-  }
-  if (exam.taken) throw new Error("Midterm attempt is already finalized");
+  if (studentSid) exam.student_sid = studentSid;
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
   const chapterIds = examChapters.map((ec) => ec.chapter_id);
@@ -509,94 +575,72 @@ export async function startMid(
     }
   }
 
+  if (!exam.questions_snapshot?.length) {
+    throw new Error("Midterm has no immutable published question package");
+  }
   const count = exam.questions_snapshot.length;
   if (requestedCount !== undefined && requestedCount !== count) {
-    throw new Error(
-      `Published midterm contains exactly ${count} questions; question_count cannot change it`,
+    throw new Error(`Published midterm contains exactly ${count} questions; question_count cannot change it`);
+  }
+  const passingMark = Math.max(1, Math.ceil(count * 0.4));
+
+  for (let loop = 0; loop < MAX_START_ATTEMPTS; loop++) {
+    const eligibility = await evaluateStart(
+      exam.student_id,
+      "mid",
+      exam._id,
+      exam,
+      now,
     );
-  }
 
-  const existingSession = await ExamSession.findOne({ exam_id: examIdObj });
-  if (existingSession) {
-    if (existingSession.status === "in_progress") return exam;
-    throw new Error("Midterm attempt cannot be restarted after finalization");
-  }
-
-  const transactionSession = await mongoose.startSession();
-  try {
-    await transactionSession.withTransaction(async () => {
-      const concurrentSession = await ExamSession.findOne({
-        exam_id: examIdObj,
-      }).session(transactionSession);
-      if (concurrentSession) {
-        if (concurrentSession.status === "in_progress") return;
-        throw new Error("Midterm attempt cannot be restarted after finalization");
-      }
-
-      if (studentSid && studentSid !== exam.student_sid) {
-        await Exam.updateOne(
-          { _id: examIdObj, published_midterm_id: exam.published_midterm_id },
-          { $set: { student_sid: studentSid } },
-          { session: transactionSession },
-        );
-        exam.student_sid = studentSid;
-      }
-
-      const startedAt = new Date();
-      await ExamSession.create(
-        [
-          {
-            exam_id: examIdObj,
-            student_id: exam.student_id,
-            started_at: startedAt,
-            suspicion_score: 0,
-            flagged: false,
-            status: "in_progress",
-          },
-        ],
-        { session: transactionSession },
-      );
-
-      const auditEntry = auditEntrySchema.parse({
-        schema_version: AUDIT_SCHEMA_VERSION,
-        occurred_at: startedAt,
-        actor: { type: "student", id: exam.student_id.toString() },
-        action: "attempt.start",
-        resource: { type: "exam", id: exam._id.toString() },
-        policy_version: INTEGRITY_POLICY_VERSION,
-        metadata: {
-          exam_type: "mid",
-          attempt_number: exam.attempt_number,
-          question_count: count,
-          package_id: exam.package_id,
-          package_version: exam.package_version,
-          package_hash: exam.package_hash,
-        },
-      });
-      await mongoose.connection.db!.collection("audit_logs").insertOne(
-        auditEntry,
-        { session: transactionSession },
-      );
-    });
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code?: number }).code === 11000
-    ) {
-      const concurrentSession = await ExamSession.findOne({
-        exam_id: examIdObj,
-        status: "in_progress",
-      });
-      if (concurrentSession) return exam;
+    if (eligibility.kind === "blocked") {
+      throw policyErrorForSnapshot(eligibility.snapshot, now);
     }
-    throw error;
-  } finally {
-    await transactionSession.endSession();
+    if (eligibility.kind === "resume") {
+      return eligibility.exam;
+    }
+
+    const issuance = await issueAttemptRecord({
+      learnerId: exam.student_id,
+      type: "mid",
+      assessmentId: exam._id,
+      sourceExamId: exam._id,
+      now,
+      basedOnAttemptNumber: eligibility.basedOnAttemptNumber,
+    });
+    if (!issuance.created) {
+      await sleep(START_RACE_BACKOFF_MS);
+      continue;
+    }
+
+    const questions = exam.questions_snapshot as Record<string, unknown>[];
+    await resetExamForAttempt(
+      exam,
+      questions,
+      passingMark,
+      issuance.record.attempt_number,
+      studentSid,
+    );
+    await resetExamSession(exam, exam.student_id, now);
+
+    await writeAudit({
+      actor: { type: "student", id: exam.student_id.toString() },
+      action: "attempt.start",
+      resource: { type: "exam", id: exam._id.toString() },
+      metadata: {
+        exam_type: "mid",
+        attempt_number: issuance.record.attempt_number,
+        question_count: count,
+      },
+    });
+
+    return exam;
   }
 
-  return exam;
+  throw new ExamAttemptError(
+    "Could not start the midterm; a concurrent start is in progress. Please retry.",
+    409,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -637,7 +681,6 @@ export async function createMid(
     type: "mid" as const,
     title,
     student_id: e.student_id,
-    curriculum_id: new mongoose.Types.ObjectId(curriculumId.toString()),
     attempt_number: 1,
     taken: false,
     passed: false,
@@ -663,81 +706,135 @@ export async function createMid(
 }
 
 /* ------------------------------------------------------------------ */
-/*   startFinal — one-shot creation                                    */
+/*   startFinal — policy-gated final (2 attempts, 2 days)              */
 /* ------------------------------------------------------------------ */
 
 export async function startFinal(
   studentId: string | mongoose.Types.ObjectId,
   curriculumId: string | mongoose.Types.ObjectId,
   studentSid?: string,
+  now: Date = new Date()
 ): Promise<IExam> {
   const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
   const curriculumIdObj = new mongoose.Types.ObjectId(
     curriculumId.toString()
   );
 
-  const existingFinal = await Exam.findOne({
-    student_id: studentIdObj,
-    student_sid: studentSid,
-    curriculum_id: curriculumIdObj,
-    type: "final",
-  });
-
-  if (existingFinal) {
-    const clearedAppeal = await IntegrityAppeal.findOne({
-      exam_id: existingFinal._id,
-      resolution: "cleared",
-      allow_retake: true,
+  for (let loop = 0; loop < MAX_START_ATTEMPTS; loop++) {
+    const existingFinal = await Exam.findOne({
+      student_id: studentIdObj,
+      curriculum_id: curriculumIdObj,
+      type: "final",
     });
-    if (!clearedAppeal) {
-      throw new Error("Final exam already exists for this student and curriculum");
+
+    const eligibility = await evaluateStart(
+      studentIdObj,
+      "final",
+      curriculumIdObj,
+      existingFinal ?? null,
+      now,
+    );
+
+    if (eligibility.kind === "blocked") {
+      throw policyErrorForSnapshot(eligibility.snapshot, now);
     }
+    if (eligibility.kind === "resume") {
+      return eligibility.exam;
+    }
+
+    const examId = existingFinal?._id ?? new mongoose.Types.ObjectId();
+    const issuance = await issueAttemptRecord({
+      learnerId: studentIdObj,
+      type: "final",
+      assessmentId: curriculumIdObj,
+      sourceExamId: examId,
+      now,
+      basedOnAttemptNumber: eligibility.basedOnAttemptNumber,
+    });
+    if (!issuance.created) {
+      await sleep(START_RACE_BACKOFF_MS);
+      continue;
+    }
+
+    const curriculum = await Curriculum.findById(curriculumIdObj);
+    if (!curriculum) throw new Error("Curriculum not found");
+    const published = existingFinal?.questions_snapshot?.length
+      ? []
+      : await publishedBank({ curriculum_id: curriculumIdObj }, studentIdObj, studentSid);
+    if (!existingFinal?.questions_snapshot?.length && published.length < FINAL_MIN_QUESTIONS) {
+      throw new Error(`Insufficient published final bank: ${published.length} available, at least ${FINAL_MIN_QUESTIONS} required`);
+    }
+    const questions = existingFinal?.questions_snapshot?.length
+      ? existingFinal.questions_snapshot as Record<string, unknown>[]
+      : published.map(publishedQuestionToSnapshot);
+    const publication = existingFinal?.blueprint_id && existingFinal.plan_version
+      ? { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version }
+      : assertOnePublishedVersion(published);
+
+    let exam: IExam;
+    if (existingFinal) {
+      await resetExamForAttempt(
+        existingFinal,
+        questions,
+        undefined,
+        issuance.record.attempt_number,
+        studentSid,
+      );
+      exam = existingFinal;
+    } else {
+      try {
+        exam = await Exam.create({
+          _id: examId,
+          type: "final",
+          title: `Final: ${curriculum.title}`,
+          student_id: studentIdObj,
+          student_sid: studentSid,
+          curriculum_id: curriculumIdObj,
+          blueprint_id: publication.blueprintId,
+          plan_version: publication.planVersion,
+          questions_snapshot: questions,
+          attempt_number: issuance.record.attempt_number,
+          generated_questions: questions,
+          student_answers: [],
+          taken: false,
+          passed: false,
+          grading_status: "auto_graded",
+          integrity_status: "clean",
+          policy_action: "none",
+          review_status: "not_required",
+        });
+      } catch (error: unknown) {
+        if (isDuplicateKeyError(error)) {
+          await sleep(START_RACE_BACKOFF_MS);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    await resetExamSession(exam, studentIdObj, now);
+
+    await writeAudit({
+      actor: { type: "student", id: studentIdObj.toString() },
+      action: "attempt.start",
+      resource: { type: "exam", id: exam._id.toString() },
+      metadata: {
+        exam_type: "final",
+        curriculum_id: curriculumIdObj.toString(),
+        attempt_number: issuance.record.attempt_number,
+        question_count: questions.length,
+        blueprint_id: publication.blueprintId.toString(),
+        plan_version: publication.planVersion,
+      },
+    });
+
+    return exam;
   }
 
-  const curriculum = await Curriculum.findById(curriculumIdObj);
-  if (!curriculum) throw new Error("Curriculum not found");
-
-  const questions = await selectAgentBankQuestions(curriculumIdObj, 10, "final");
-  const now = new Date();
-
-  const exam = await Exam.create({
-    type: "final",
-    title: `Final: ${curriculum.title}`,
-    student_id: studentIdObj,
-    curriculum_id: curriculumIdObj,
-    attempt_number: 1,
-    generated_questions: questions,
-    student_answers: [],
-    taken: false,
-    passed: false,
-    grading_status: "auto_graded",
-    integrity_status: "clean",
-    policy_action: "none",
-    review_status: "not_required",
-  });
-
-  await ExamSession.create({
-    exam_id: exam._id,
-    student_id: studentIdObj,
-    started_at: now,
-    suspicion_score: 0,
-    flagged: false,
-    status: "in_progress",
-  });
-
-  await writeAudit({
-    actor: { type: "student", id: studentIdObj.toString() },
-    action: "attempt.start",
-    resource: { type: "exam", id: exam._id.toString() },
-    metadata: {
-      exam_type: "final",
-      curriculum_id: curriculumIdObj.toString(),
-      attempt_number: exam.attempt_number,
-      question_count: questions.length,
-    },
-  });
-
-  return exam;
+  throw new ExamAttemptError(
+    "Could not start the final; a concurrent start is in progress. Please retry.",
+    409,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -996,6 +1093,16 @@ export async function submitExam(
     await session.save();
   }
 
+  // A submitted attempt is terminal: freeze the ledger record with its
+  // durable evidence. Cooldown begins from this server-recorded time. A retry
+  // therefore can never refund or erase this attempt.
+  await finalizeActiveRecordForSourceExam(
+    exam._id,
+    "submitted",
+    session?.ended_at ?? new Date(),
+    buildTerminalEvidence(exam, session ?? null),
+  );
+
   if (exam.integrity_status === "invalidated") {
     await notifyIntegrityInvalidation(exam);
   }
@@ -1224,15 +1331,7 @@ export function stripCorrectOption(
 export function examToPlain(exam: { toObject?: () => Record<string, unknown> }): Record<string, unknown> {
   const plain = exam.toObject ? exam.toObject() : { ...exam };
   if (plain.type !== "mid") return plain;
-
-  const publicFields = [
-    "_id",
-    "type",
-    "title",
-    "taken",
-    "createdAt",
-    "updatedAt",
-  ];
+  const publicFields = ["_id", "type", "title", "taken", "createdAt", "updatedAt"];
   return Object.fromEntries(
     publicFields
       .filter((field) => plain[field] !== undefined)

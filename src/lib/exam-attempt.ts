@@ -4,6 +4,12 @@ import { z } from "zod";
 import { Exam, type IExam } from "@/models/Exam";
 import { ExamSession, type IExamSession } from "@/models/ExamSession";
 import { assertStandaloneRequest, isStandalone } from "@/lib/runtime";
+import {
+  AttemptPolicyError,
+  attemptPolicyStatement,
+  getAttemptPolicySnapshot,
+  type AttemptPolicySnapshot,
+} from "@/lib/exam-attempt-policy";
 
 export type PublicQuestion = {
   question_id: string;
@@ -29,6 +35,10 @@ export type ExamAttemptView = {
   can_submit: boolean;
   integrity_state: "active" | "reconnecting" | "grace" | "integrity_locked" | "submitted";
   lock_reason?: string;
+  /** Versioned attempt-policy snapshot the Exam server owns. */
+  attempt_policy?: AttemptPolicySnapshot;
+  /** Exact readiness wording for the policy, e.g. "Quiz: 2 attempts, 3 hours between attempts". */
+  attempt_statement?: string;
   result?: {
     grading_status: "auto_graded" | "pending_review" | "graded";
     mark?: number;
@@ -149,7 +159,7 @@ export function buildExamAttemptView(
     | "passed"
     | "review_status"
   >,
-  session: Pick<
+  session: (Pick<
     IExamSession,
     | "current_question_index"
     | "answer_revision"
@@ -157,8 +167,8 @@ export function buildExamAttemptView(
     | "status"
     | "integrity_state"
     | "integrity_lock_reason"
-    | "started_at"
-  > | null,
+  > & { started_at?: Date }) | null,
+  attemptPolicy?: AttemptPolicySnapshot,
 ): ExamAttemptView {
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
   const index = Math.min(
@@ -192,6 +202,12 @@ export function buildExamAttemptView(
     ...(session?.integrity_lock_reason
       ? { lock_reason: session.integrity_lock_reason }
       : {}),
+    ...(attemptPolicy
+      ? {
+          attempt_policy: attemptPolicy,
+          attempt_statement: attemptStatementFor(attemptPolicy),
+        }
+      : {}),
     ...(exam.taken
       ? {
           result: {
@@ -207,6 +223,13 @@ export function buildExamAttemptView(
   };
 }
 
+function attemptStatementFor(policy: AttemptPolicySnapshot): string {
+  if (policy.assessment_type === "unknown") {
+    return "Attempt policy unavailable for this assessment type";
+  }
+  return attemptPolicyStatement(policy.assessment_type);
+}
+
 export async function getExamAttemptView(
   examId: string | mongoose.Types.ObjectId,
   knownSession?: IExamSession | null,
@@ -216,7 +239,8 @@ export async function getExamAttemptView(
   const session = knownSession === undefined
     ? await ExamSession.findOne({ exam_id: exam._id })
     : knownSession;
-  return buildExamAttemptView(exam, session ?? null);
+  const policy = await getAttemptPolicySnapshot(exam);
+  return buildExamAttemptView(exam, session ?? null, policy);
 }
 
 export async function createExamLaunch(
@@ -225,7 +249,8 @@ export async function createExamLaunch(
 ): Promise<ExamAttemptView & { attempt_token: string; launch_url: string }> {
   const attemptToken = await issueExamAttemptToken(exam._id);
   const session = await ExamSession.findOne({ exam_id: exam._id });
-  const view = buildExamAttemptView(exam, session);
+  const policy = await getAttemptPolicySnapshot(exam);
+  const view = buildExamAttemptView(exam, session, policy);
   return {
     ...view,
     attempt_token: attemptToken,
@@ -252,7 +277,8 @@ export async function saveCurrentAnswer(
   }
 
   if (session.last_action_id === input.idempotency_key) {
-    return { ...buildExamAttemptView(exam, session), idempotent: true };
+    const policy = await getAttemptPolicySnapshot(exam);
+    return { ...buildExamAttemptView(exam, session, policy), idempotent: true };
   }
 
   const index = session.current_question_index ?? 0;
@@ -293,7 +319,8 @@ export async function saveCurrentAnswer(
   );
   if (!updated) throw new ExamAttemptError("Answer state changed; reload the current question", 409);
 
-  return { ...buildExamAttemptView(exam, updated), idempotent: false };
+  const policy = await getAttemptPolicySnapshot(exam);
+  return { ...buildExamAttemptView(exam, updated, policy), idempotent: false };
 }
 
 export async function getServerStoredAnswers(
@@ -317,6 +344,23 @@ export async function getServerStoredAnswers(
 }
 
 export function examAttemptErrorResponse(error: unknown): Response {
+  if (error instanceof AttemptPolicyError) {
+    const headers: Record<string, string> = {};
+    if (error.reason_code === "cooldown" && error.retryAfterMs !== undefined) {
+      headers["Retry-After"] = String(
+        Math.max(1, Math.ceil(error.retryAfterMs / 1000)),
+      );
+    }
+    return Response.json(
+      {
+        error: error.message,
+        reason_code: error.reason_code,
+        next_attempt_at: error.snapshot.next_attempt_at,
+        attempt_policy: error.snapshot,
+      },
+      { status: error.status, headers },
+    );
+  }
   if (error instanceof ExamAttemptError) {
     return Response.json({ error: error.message }, { status: error.status });
   }

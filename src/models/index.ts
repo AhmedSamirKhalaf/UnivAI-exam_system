@@ -58,3 +58,10 @@ export type {
 
 export { QuestionProvenance } from "./QuestionProvenance";
 export type { IQuestionProvenance, IProvenanceSource } from "./QuestionProvenance";
+
+export { ExamAttemptRecord } from "./ExamAttemptRecord";
+export type {
+  IExamAttemptRecord,
+  AttemptTerminalStatus,
+  IAttemptFinalEvidence,
+} from "./ExamAttemptRecord";

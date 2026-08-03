@@ -8,6 +8,13 @@ export interface IProvenanceSource {
   excerpt?: string;
 }
 
+export interface IQuestionRubric {
+  criteria: string[];
+  model_answer_excerpt: string;
+  marks_breakdown: Record<string, number>;
+  provenance: IProvenanceSource;
+}
+
 export interface IQuestionProvenance extends Document {
   _id: mongoose.Types.ObjectId;
   blueprint_id: mongoose.Types.ObjectId;
@@ -21,7 +28,7 @@ export interface IQuestionProvenance extends Document {
   package_id?: string;
   source_ids?: string[];
   chapter_id?: mongoose.Types.ObjectId;
-  week?: number;
+  week?: number | string;
   objective_ids?: string[];
   difficulty?: "easy" | "medium" | "hard";
   integration?: boolean;
@@ -30,10 +37,10 @@ export interface IQuestionProvenance extends Document {
   question_hash?: string;
   approved: boolean;
   provenance: IProvenanceSource;
-  // Publication trace (QuizPackageV1): the weekly delivery target and the
-  // agent generator run that produced the question. Optional so documents
-  // published before this sprint remain valid.
+  // Publication scope used by the quiz and cumulative-final contracts.
+  curriculum_id?: mongoose.Types.ObjectId;
   learner_id?: string;
+  rubric?: IQuestionRubric;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,7 +73,7 @@ const questionProvenanceSchema = new Schema<IQuestionProvenance>(
     package_id: { type: String, immutable: true },
     source_ids: [{ type: String, immutable: true }],
     chapter_id: { type: Schema.Types.ObjectId, ref: "Chapter", immutable: true },
-    week: { type: Number, min: 1, immutable: true },
+    week: { type: Schema.Types.Mixed, immutable: true },
     objective_ids: [{ type: String, immutable: true }],
     difficulty: {
       type: String,
@@ -93,9 +100,31 @@ const questionProvenanceSchema = new Schema<IQuestionProvenance>(
       section: { type: String, required: true, immutable: true },
       excerpt: { type: String, immutable: true },
     },
+    curriculum_id: {
+      type: Schema.Types.ObjectId,
+      ref: "Curriculum",
+      immutable: true,
+    },
     learner_id: { type: String, immutable: true },
+    rubric: {
+      criteria: { type: [String], immutable: true },
+      model_answer_excerpt: { type: String, immutable: true },
+      marks_breakdown: { type: Schema.Types.Mixed, immutable: true },
+      provenance: {
+        document_id: { type: String, immutable: true },
+        document_title: { type: String, immutable: true },
+        page_number: { type: Number, min: 1, immutable: true },
+        section: { type: String, immutable: true },
+        excerpt: { type: String, immutable: true },
+      },
+    },
   },
   { timestamps: true, versionKey: false },
+);
+
+questionProvenanceSchema.index(
+  { curriculum_id: 1, approved: 1 },
+  { partialFilterExpression: { curriculum_id: { $exists: true } } },
 );
 
 questionProvenanceSchema.index(

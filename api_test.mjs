@@ -51,26 +51,8 @@ async function seedPublishedQuestionBanks(
   planVersion
 ) {
   const collection = mongoose.connection.collection("questionprovenances");
-  const legacyCollection = mongoose.connection.collection("question_banks");
   const now = new Date();
   for (const [chapterIndex, chapterId] of chapterIds.entries()) {
-    await legacyCollection.updateOne(
-      { chapter_id: chapterId },
-      {
-        $set: {
-          seed_version: "ci-final-bank-v1",
-          questions: Array.from({ length: 12 }, (_, questionIndex) => ({
-            question_id: `ci-final-bank-${chapterIndex + 1}-${questionIndex + 1}`,
-            prompt: `Agent supplied cumulative question ${chapterIndex + 1}-${questionIndex + 1}`,
-            type: "mcq",
-            options: ["A", "B", "C", "D"],
-            correct_option: "A",
-            source: "lecture",
-          })),
-        },
-      },
-      { upsert: true }
-    );
     const questions = Array.from({ length: 5 }, (_, questionIndex) => ({
       blueprint_id: new mongoose.Types.ObjectId(blueprintId),
       chapter_id: new mongoose.Types.ObjectId(chapterId),
@@ -96,6 +78,30 @@ async function seedPublishedQuestionBanks(
     await collection.insertMany(questions);
   }
 
+  await collection.insertMany(
+    Array.from({ length: 10 }, (_, index) => ({
+      blueprint_id: new mongoose.Types.ObjectId(blueprintId),
+      curriculum_id: new mongoose.Types.ObjectId(curriculumId),
+      learner_id: learnerId,
+      package_id: "ci-final-package-v1",
+      schema_version: "question-provenance-v1",
+      question_id: `ci-final-${index + 1}`,
+      prompt: `Grounded cumulative final question ${index + 1}`,
+      type: "mcq",
+      options: ["A", "B", "C", "D"],
+      correct_option: "A",
+      plan_version: planVersion,
+      approved: true,
+      provenance: {
+        document_id: "ci-course-notes-v1",
+        document_title: "CI Course Notes",
+        page_number: index + 1,
+        section: `Week ${(index % chapterIds.length) + 1}`,
+      },
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
 }
 
 function buildMidtermPackage({ blueprintId, curriculumId, chapterIds, planVersion }) {
