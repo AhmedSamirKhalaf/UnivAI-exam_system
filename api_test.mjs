@@ -51,8 +51,26 @@ async function seedPublishedQuestionBanks(
   planVersion
 ) {
   const collection = mongoose.connection.collection("questionprovenances");
+  const legacyCollection = mongoose.connection.collection("question_banks");
   const now = new Date();
   for (const [chapterIndex, chapterId] of chapterIds.entries()) {
+    await legacyCollection.updateOne(
+      { chapter_id: new mongoose.Types.ObjectId(chapterId) },
+      {
+        $set: {
+          seed_version: "ci-final-bank-v1",
+          questions: Array.from({ length: 12 }, (_, questionIndex) => ({
+            question_id: `ci-final-bank-${chapterIndex + 1}-${questionIndex + 1}`,
+            prompt: `Agent supplied cumulative question ${chapterIndex + 1}-${questionIndex + 1}`,
+            type: "mcq",
+            options: ["A", "B", "C", "D"],
+            correct_option: "A",
+            source: "lecture",
+          })),
+        },
+      },
+      { upsert: true }
+    );
     const questions = Array.from({ length: 5 }, (_, questionIndex) => ({
       blueprint_id: new mongoose.Types.ObjectId(blueprintId),
       chapter_id: new mongoose.Types.ObjectId(chapterId),
