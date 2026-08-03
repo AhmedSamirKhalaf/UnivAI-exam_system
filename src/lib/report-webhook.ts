@@ -3,6 +3,7 @@ import { ProctoringEvent } from "@/models/ProctoringEvent";
 import type { IExam } from "@/models/Exam";
 import { resultWebhookSchema } from "@/lib/contracts";
 import { isStandalone } from "@/lib/runtime";
+import { signResultWebhook } from "@/lib/webhook-signature";
 
 /**
  * After a submission, send the result AND the proctoring report back to the
@@ -60,10 +61,19 @@ export async function sendResultWebhook(exam: IExam): Promise<void> {
       return;
     }
 
+    const rawBody = JSON.stringify(validated);
+    const signature = signResultWebhook(
+      rawBody,
+      process.env.EXAM_CALLBACK_SECRET ?? "",
+    );
+
     await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validated),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Exam-Signature": signature,
+      },
+      body: rawBody,
     });
   } catch (error) {
     console.error("[webhook] failed to deliver result:", error);
