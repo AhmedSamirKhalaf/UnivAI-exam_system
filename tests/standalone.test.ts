@@ -9,6 +9,7 @@ import {
   getDevToolsDimensionSignal,
   getRestrictedShortcut,
 } from "../src/lib/proctoring-signals";
+import { signResultWebhook } from "../src/lib/webhook-signature";
 
 test("seeded random produces stable question order", () => {
   const first = shuffled([1, 2, 3, 4, 5], createSeededRandom(20260727));
@@ -25,6 +26,17 @@ test("canonical result webhook validates and uses non-guilt policy terms", async
   assert.equal(parsed.policy_action, "none");
   assert.equal(parsed.review_status, "not_required");
   assert.equal(JSON.stringify(parsed).toLowerCase().includes("cheat"), false);
+});
+
+test("result webhook signature is deterministic and covers the exact raw body", () => {
+  const secret = "integration-only-secret";
+  const raw = '{"exam_id":"64b000000000000000000023","mark":4}';
+  assert.equal(
+    signResultWebhook(raw, secret),
+    "770e0f433d8fbf47b37e7ec420d9a2326874ed9b8f6e1fe0e2f2c371c9aca5c5",
+  );
+  assert.notEqual(signResultWebhook(`${raw} `, secret), signResultWebhook(raw, secret));
+  assert.throws(() => signResultWebhook(raw, ""), /EXAM_CALLBACK_SECRET is required/);
 });
 
 test("invalid proctoring event is rejected", () => {
