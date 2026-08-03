@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 
 /* ────────────────────────────────────────────
@@ -7,6 +8,7 @@ import mongoose from "mongoose";
 const BASE = process.env.BASE_URL || "http://localhost:3200";
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://127.0.0.1:27018/univai_exams_standalone";
+const AGENT_TOKEN = process.env.UNIVAI_AGENT_SECRET || "";
 
 /* ────────────────────────────────────────────
    Stats
@@ -21,6 +23,136 @@ function header(text) {
   console.log(`\n${"=".repeat(60)}`);
   console.log(`  ${text}`);
   console.log(`${"=".repeat(60)}`);
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalValue(nested)])
+    );
+  }
+  return value;
+}
+
+function hashValue(value) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalValue(value)))
+    .digest("hex");
+}
+
+async function seedAgentQuestionBanks(chapterIds) {
+  const collection = mongoose.connection.collection("question_banks");
+  for (const [chapterIndex, chapterId] of chapterIds.entries()) {
+    const questions = Array.from({ length: 12 }, (_, questionIndex) => ({
+      question_id: `ci-bank-${chapterIndex + 1}-${questionIndex + 1}`,
+      prompt: `Agent supplied question ${chapterIndex + 1}-${questionIndex + 1}`,
+      type: "mcq",
+      options: ["A", "B", "C", "D"],
+      correct_option: "A",
+      source: "lecture",
+    }));
+    await collection.updateOne(
+      { chapter_id: chapterId },
+      { $set: { seed_version: "ci-agent-bank-v1", questions } },
+      { upsert: true }
+    );
+  }
+}
+
+function buildMidtermPackage({ blueprintId, curriculumId, chapterIds, planVersion }) {
+  const documentId = "ci-course-notes-v1";
+  const documentTitle = "CI Course Notes";
+  const promptVersion = "ci-midterm-prompt-v1";
+  const outcomes = chapterIds.map((_, index) => `week-${index + 1}-objective`);
+  const completedChapters = chapterIds.map((chapterId, index) => ({
+    chapter_id: chapterId,
+    week: index + 1,
+    objectives:
+      index < outcomes.length - 1
+        ? [outcomes[index], outcomes[index + 1]]
+        : [outcomes[index]],
+  }));
+  const difficulty = [
+    "easy",
+    "medium",
+    "hard",
+    "easy",
+    "medium",
+    "hard",
+    "easy",
+    "medium",
+    "hard",
+    "easy",
+  ];
+  const questions = Array.from({ length: 10 }, (_, index) => {
+    const week = Math.floor(index / 2) + 1;
+    const objectiveIds = index < 2
+      ? [outcomes[0], outcomes[1]]
+      : [outcomes[week - 1]];
+    const question = {
+      schema_version: "question-provenance-v1",
+      question_id: `ci-midterm-q-${index + 1}`,
+      prompt: `Grounded midterm question ${index + 1}`,
+      type: "mcq",
+      options: ["A", "B", "C", "D"],
+      correct_option: "A",
+      plan_version: planVersion,
+      provenance: {
+        document_id: documentId,
+        document_title: documentTitle,
+        page_number: week * 10,
+        section: `Week ${week}`,
+        excerpt: `Evidence for grounded question ${index + 1}`,
+      },
+      source_ids: [documentId],
+      chapter_id: chapterIds[week - 1],
+      week,
+      objective_ids: objectiveIds,
+      difficulty: difficulty[index],
+      integration: index < 2,
+      generator_prompt_version: promptVersion,
+    };
+    return { ...question, question_hash: hashValue(question) };
+  });
+  const packageWithoutHash = {
+    schema_version: "midterm-package-v1",
+    package_id: "ci-grounded-midterm-v1",
+    package_version: "1.0.0",
+    publication_key: "ci-grounded-midterm-publication-v1",
+    blueprint_id: blueprintId,
+    blueprint_version: 0,
+    plan_version: planVersion,
+    curriculum_id: curriculumId,
+    completed_scope: {
+      start_week: 1,
+      end_week: chapterIds.length,
+      chapters: completedChapters,
+    },
+    balance: {
+      question_count: questions.length,
+      difficulty_counts: { easy: 4, medium: 3, hard: 3 },
+      maximum_questions_per_week: 2,
+      minimum_integration_questions: 2,
+    },
+    prompt_trace: {
+      generator_name: "UnivAI-Agent",
+      generator_version: "ci-agent-v1",
+      prompt_id: "ci-balanced-grounded-midterm",
+      prompt_version: promptVersion,
+      generated_at: new Date().toISOString(),
+    },
+    answer_key: Object.fromEntries(
+      questions.map((question) => [question.question_id, question.correct_option])
+    ),
+    questions,
+  };
+  return {
+    ...packageWithoutHash,
+    package_hash: hashValue(packageWithoutHash),
+  };
 }
 
 async function test(label, method, url, body = undefined, headers = {}) {
@@ -267,6 +399,40 @@ async function main() {
   }
 
   /* 5–6 ─ For each chapter: start + submit quiz ── */
+  let midtermBlueprintId = null;
+  let midtermPlanVersion = null;
+  if (curriculumId && chapterIds.length > 0) {
+    await seedAgentQuestionBanks(chapterIds);
+    midtermBlueprintId = new mongoose.Types.ObjectId().toString();
+    midtermPlanVersion = `ci-plan-${ts}`;
+    const outcomes = chapterIds.map((_, index) => `week-${index + 1}-objective`);
+    const now = new Date();
+    await mongoose.connection.collection("assessmentblueprints").insertOne({
+      _id: new mongoose.Types.ObjectId(midtermBlueprintId),
+      schema_version: "assessment-blueprint-v1",
+      programme: "Computer Science",
+      semester: "CI",
+      course_id: curriculumId,
+      title: "CI grounded midterm blueprint",
+      outcomes,
+      difficulty: "mixed",
+      source_coverage: chapterIds.map((_, index) => ({
+        document_id: "ci-course-notes-v1",
+        document_title: "CI Course Notes",
+        sections: [`Week ${index + 1}`],
+        page_ranges: [{ start: 1, end: 100 }],
+      })),
+      plan_version: midtermPlanVersion,
+      approved: true,
+      approved_by: "ci-fixture",
+      approved_at: now,
+      __v: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    console.log("    Agent question banks and approved blueprint seeded");
+  }
+
   const submittedQuizzes = [];
 
   for (let i = 0; i < chapterIds.length; i++) {
@@ -341,6 +507,24 @@ async function main() {
   }
 
   /* 9 ─ POST /api/exams/mid/:id/start ────── */
+  if (createdMidIds.length > 0 && midtermBlueprintId && midtermPlanVersion) {
+    if (!AGENT_TOKEN) {
+      throw new Error("UNIVAI_AGENT_SECRET is required for CI midterm publication");
+    }
+    await test(
+      "8a. Publish grounded midterm package (Agent)",
+      "POST",
+      "/api/assessments/midterm/publish",
+      buildMidtermPackage({
+        blueprintId: midtermBlueprintId,
+        curriculumId,
+        chapterIds,
+        planVersion: midtermPlanVersion,
+      }),
+      { "x-univai-agent-token": AGENT_TOKEN }
+    );
+  }
+
   let startedMidId = null;
   let startedMidToken = null;
 

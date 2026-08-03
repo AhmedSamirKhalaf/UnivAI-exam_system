@@ -213,16 +213,22 @@ async function selectAgentBankQuestions(
   count: number,
   examType: "quiz" | "mid" | "final"
 ): Promise<Record<string, unknown>[]> {
-  const chapterIds = Array.isArray(scope) ? scope : [scope];
+  const chapterIds = Array.isArray(scope)
+    ? scope
+    : examType === "final"
+      ? (
+          await Chapter.find({ curriculum_id: scope })
+            .select("_id")
+            .lean()
+        ).map((chapter) => chapter._id)
+      : [scope];
   const random = isStandalone()
     ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
     : Math.random;
 
   const pool: BankQuestion[] = [];
-  if (examType !== "final") {
-    for (const chapterId of chapterIds) {
-      pool.push(...(await bankQuestions(chapterId)));
-    }
+  for (const chapterId of chapterIds) {
+    pool.push(...(await bankQuestions(chapterId)));
   }
 
   if (!pool.length) {

@@ -16,25 +16,33 @@ concurrency:
 jobs:
   exam:
     runs-on: ubuntu-latest
-    services:
-      mongo:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       BASE_URL: http://127.0.0.1:3000
-      MONGODB_URI: mongodb://127.0.0.1:27017/exam_system
+      MONGODB_URI: "mongodb://127.0.0.1:27017/exam_system?replicaSet=rs0&directConnection=true"
       PORT: 3000
+      UNIVAI_AGENT_SECRET: ${{ github.sha }}
     steps:
       - name: Check out Exam only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
+      - name: Start MongoDB replica set
+        shell: bash
+        run: |
+          docker run --detach --name univai-ci-mongo --network host mongo:7 mongod --replSet rs0 --bind_ip_all
+          for attempt in {1..30}; do
+            if docker exec univai-ci-mongo mongosh --quiet --eval "db.runCommand({ ping: 1 }).ok" | grep -q '^1$'; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec univai-ci-mongo mongosh --quiet --eval "rs.initiate()"
+          for attempt in {1..30}; do
+            if docker exec univai-ci-mongo mongosh --quiet --eval "db.hello().isWritablePrimary" | grep -qi '^true$'; then
+              break
+            fi
+            sleep 1
+          done
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
