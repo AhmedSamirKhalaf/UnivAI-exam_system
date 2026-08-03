@@ -10,7 +10,6 @@ import { ProctoringEvent, ProctoringEventType } from "@/models/ProctoringEvent";
 import { ExamSession } from "@/models/ExamSession";
 import { GradeHistory } from "@/models/GradeHistory";
 import { IntegrityAppeal } from "@/models/IntegrityAppeal";
-import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { PROCTORING_CONFIG } from "@/lib/proctoring-config";
 import {
   createSeededRandom,
