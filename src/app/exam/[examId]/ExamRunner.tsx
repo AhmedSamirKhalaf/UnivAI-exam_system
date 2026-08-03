@@ -57,6 +57,22 @@ type Question = {
   options?: string[];
 };
 
+type AttemptPolicy = {
+  assessment_type: "quiz" | "mid" | "final" | "unknown";
+  max_attempts: number;
+  attempts_used: number;
+  attempts_remaining: number;
+  cooldown_seconds: number;
+  next_attempt_at: string | null;
+  can_start: boolean;
+  reason_code:
+    | "ok"
+    | "attempt_active"
+    | "cooldown"
+    | "exhausted"
+    | "unknown_assessment_type";
+};
+
 type ExamAttempt = {
   _id: string;
   type: "quiz" | "mid" | "final";
@@ -70,6 +86,8 @@ type ExamAttempt = {
   can_submit: boolean;
   integrity_state: "active" | "reconnecting" | "grace" | "integrity_locked" | "submitted";
   lock_reason?: string;
+  attempt_policy?: AttemptPolicy;
+  attempt_statement?: string;
   result?: {
     grading_status: "auto_graded" | "pending_review" | "graded";
     mark?: number;
@@ -118,6 +136,64 @@ function useElapsedLabel(startedAt: string | undefined, active: boolean): string
     return () => window.clearInterval(timer);
   }, [active]);
   return formatElapsed(startedAt, now);
+}
+
+function localEligibleTime(nextAttemptAt: string): string {
+  const date = new Date(nextAttemptAt);
+  return Number.isNaN(date.getTime())
+    ? "unavailable"
+    : date.toLocaleString();
+}
+
+function PolicyNotice({
+  policy,
+  statement,
+}: {
+  policy: AttemptPolicy;
+  statement: string;
+}) {
+  return (
+    <Alert severity="info" icon={<ScheduleOutlined />} role="status">
+      <AlertTitle>Attempt policy</AlertTitle>
+      <Typography variant="body2">{statement}</Typography>
+      <Typography variant="body2">
+        Used {policy.attempts_used} of {policy.max_attempts} attempts ·{" "}
+        {policy.attempts_remaining} remaining
+      </Typography>
+      {policy.reason_code === "cooldown" && policy.next_attempt_at ? (
+        <Typography variant="body2">
+          Next attempt eligible at {localEligibleTime(policy.next_attempt_at)}
+        </Typography>
+      ) : null}
+      {policy.reason_code === "exhausted" ? (
+        <Typography variant="body2">
+          No attempts remain for this assessment.
+        </Typography>
+      ) : null}
+    </Alert>
+  );
+}
+
+function PolicyBlockedCard({ exam }: { exam: ExamAttempt }) {
+  return (
+    <Card variant="outlined">
+      <CardContent>
+        <Stack spacing={3}>
+          <LockOutlined color="error" fontSize="large" />
+          <Typography variant="h4">This attempt is not available yet</Typography>
+          {exam.attempt_statement && exam.attempt_policy ? (
+            <PolicyNotice
+              policy={exam.attempt_policy}
+              statement={exam.attempt_statement}
+            />
+          ) : null}
+          <Typography color="text.secondary">
+            Return to UnivAI to start this exam when it becomes eligible.
+          </Typography>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
@@ -435,6 +511,12 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                 ) : (
                   <Alert severity="success" role="status">Submission completed.</Alert>
                 )}
+                {exam.attempt_policy && exam.attempt_statement ? (
+                  <PolicyNotice
+                    policy={exam.attempt_policy}
+                    statement={exam.attempt_statement}
+                  />
+                ) : null}
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <Button variant="contained" href={`${returnUrl}/exams`} startIcon={<QuizOutlined />}>
                     Open results in UnivAI
@@ -524,6 +606,16 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     );
   }
 
+  if (
+    !started &&
+    exam.attempt_policy &&
+    !exam.attempt_policy.can_start &&
+    (exam.attempt_policy.reason_code === "cooldown" ||
+      exam.attempt_policy.reason_code === "exhausted")
+  ) {
+    return <PolicyBlockedCard exam={exam} />;
+  }
+
   if (!started) {
     return (
       <Fade in timeout={225}>
@@ -537,6 +629,12 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                 <Typography variant="h4">{exam.title}</Typography>
                 <Typography color="text.secondary">A short readiness check gives you one clear road into the exam.</Typography>
               </Stack>
+              {exam.attempt_statement && exam.attempt_policy ? (
+                <PolicyNotice
+                  policy={exam.attempt_policy}
+                  statement={exam.attempt_statement}
+                />
+              ) : null}
               <Stepper activeStep={readinessStep} alternativeLabel>
                 {[
                   ["Rules", "Read the exam policy"],
