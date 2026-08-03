@@ -1329,5 +1329,12 @@ export function stripCorrectOption(
 }
 
 export function examToPlain(exam: { toObject?: () => Record<string, unknown> }): Record<string, unknown> {
-  return exam.toObject ? exam.toObject() : { ...exam };
+  const plain = exam.toObject ? exam.toObject() : { ...exam };
+  if (plain.type !== "mid") return plain;
+  const publicFields = ["_id", "type", "title", "taken", "createdAt", "updatedAt"];
+  return Object.fromEntries(
+    publicFields
+      .filter((field) => plain[field] !== undefined)
+      .map((field) => [field, plain[field]]),
+  );
 }
