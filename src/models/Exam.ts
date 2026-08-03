@@ -23,7 +23,14 @@ export interface IExam extends Document {
   curriculum_id?: mongoose.Types.ObjectId;
   chapter_id?: mongoose.Types.ObjectId;
   blueprint_id?: mongoose.Types.ObjectId;
+  blueprint_version?: number;
   plan_version?: string;
+  published_midterm_id?: mongoose.Types.ObjectId;
+  package_id?: string;
+  package_version?: string;
+  package_hash?: string;
+  publication_key?: string;
+  published_at?: Date;
   questions_snapshot?: QuestionProvenanceInput[];
   submitted_at?: Date;
   submission_idempotency_key?: string;
@@ -71,7 +78,18 @@ const examSchema = new Schema<IExam>(
       type: Schema.Types.ObjectId,
       ref: "AssessmentBlueprint",
     },
-    plan_version: { type: String },
+    blueprint_version: { type: Number, min: 0, immutable: true },
+    plan_version: { type: String, immutable: true },
+    published_midterm_id: {
+      type: Schema.Types.ObjectId,
+      ref: "MidtermPublication",
+      immutable: true,
+    },
+    package_id: { type: String, immutable: true },
+    package_version: { type: String, immutable: true },
+    package_hash: { type: String, immutable: true },
+    publication_key: { type: String, immutable: true },
+    published_at: { type: Date, immutable: true },
     questions_snapshot: { type: Schema.Types.Mixed, immutable: true },
     submitted_at: { type: Date },
     submission_idempotency_key: { type: String },
@@ -115,6 +133,25 @@ const examSchema = new Schema<IExam>(
 
 examSchema.pre("validate", function validateBlueprintSnapshot() {
   if (!this.blueprint_id) return;
+  if (this.type === "mid") {
+    const requiredPublicationFields = [
+      ["published_midterm_id", this.published_midterm_id],
+      ["blueprint_version", this.blueprint_version],
+      ["package_id", this.package_id],
+      ["package_version", this.package_version],
+      ["package_hash", this.package_hash],
+      ["publication_key", this.publication_key],
+      ["published_at", this.published_at],
+    ] as const;
+    for (const [path, value] of requiredPublicationFields) {
+      if (value === undefined || value === null || value === "") {
+        this.invalidate(
+          path,
+          `Published midterms require ${path}`,
+        );
+      }
+    }
+  }
   if (!this.plan_version) {
     this.invalidate(
       "plan_version",
@@ -133,6 +170,19 @@ examSchema.pre("validate", function validateBlueprintSnapshot() {
       `Blueprint-backed exams require a valid immutable question snapshot: ${snapshot.error.issues
         .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
         .join("; ")}`,
+    );
+    return;
+  }
+
+  if (
+    this.type === "mid" &&
+    this.published_midterm_id &&
+    JSON.stringify(this.generated_questions ?? []) !==
+      JSON.stringify(this.questions_snapshot ?? [])
+  ) {
+    this.invalidate(
+      "generated_questions",
+      "Published midterm delivery questions must equal the immutable question snapshot",
     );
     return;
   }
@@ -168,6 +218,33 @@ examSchema.pre("validate", function validateBlueprintSnapshot() {
       this.invalidate(
         "student_answers",
         error instanceof Error ? error.message : "Student answers are invalid",
+      );
+    }
+  }
+});
+
+examSchema.pre("validate", function guardPublishedMidtermBinding() {
+  if (this.isNew || !this.published_midterm_id) return;
+
+  const immutableBindingPaths = [
+    "curriculum_id",
+    "blueprint_id",
+    "blueprint_version",
+    "plan_version",
+    "questions_snapshot",
+    "generated_questions",
+    "published_midterm_id",
+    "package_id",
+    "package_version",
+    "package_hash",
+    "publication_key",
+    "published_at",
+  ];
+  for (const path of immutableBindingPaths) {
+    if (this.isModified(path)) {
+      this.invalidate(
+        path,
+        "Published midterm package bindings are immutable",
       );
     }
   }

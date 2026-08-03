@@ -16,7 +16,12 @@ import {
   type RandomSource,
 } from "@/lib/deterministic-rng";
 import { isStandalone } from "@/lib/runtime";
-import { INTEGRITY_POLICY_VERSION, writeAudit } from "@/lib/audit-log";
+import {
+  AUDIT_SCHEMA_VERSION,
+  INTEGRITY_POLICY_VERSION,
+  auditEntrySchema,
+  writeAudit,
+} from "@/lib/audit-log";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -169,10 +174,11 @@ async function bumpSuspicionScore(
 }
 
 /* ------------------------------------------------------------------ */
-/*   Question generation — drawn from the per-chapter question bank    */
+/*   Agent question bank selection                                    */
 /* ------------------------------------------------------------------ */
 
 type BankQuestion = {
+  question_id: string;
   prompt: string;
   type: "mcq" | "essay";
   options?: string[];
@@ -182,10 +188,9 @@ type BankQuestion = {
 };
 
 /**
- * UnivAI generates questions from the course book and stores them per chapter
- * in the `question_banks` collection ({ chapter_id, questions }). Exams draw
- * from there, so a quiz is actually about its lecture. The old placeholder
- * generator survives only as a last resort for chapters with no bank.
+ * UnivAI-Agent stores complete questions per chapter in `question_banks`.
+ * Exam may select those supplied records, but it never fabricates missing
+ * content or identifiers.
  */
 async function bankQuestions(
   chapterId: mongoose.Types.ObjectId
@@ -196,55 +201,40 @@ async function bankQuestions(
     .collection("question_banks")
     .findOne({ chapter_id: chapterId.toString() });
   const questions = (bank?.questions ?? []) as BankQuestion[];
-  return questions.filter((q) => q.prompt && q.type);
+  return questions.filter((q) => q.question_id && q.prompt && q.type);
 }
 
 function sample<T>(items: T[], count: number, random: RandomSource): T[] {
   return shuffled(items, random).slice(0, count);
 }
 
-function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
-  const questions: Record<string, unknown>[] = [];
-  for (let i = 1; i <= count; i++) {
-    if (examType === "final" && i % 3 === 0) {
-      questions.push({
-        question_id: `q_${i}`,
-        prompt: `Placeholder essay question ${i} — describe a key concept.`,
-        type: "essay",
-        correct_option: undefined,
-      });
-    } else {
-      questions.push({
-        question_id: `q_${i}`,
-        prompt: `Placeholder MCQ question ${i}?`,
-        type: "mcq",
-        options: ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-        correct_option: String.fromCharCode(65 + (i % 4)),
-      });
-    }
-  }
-  return questions;
-}
-
-export async function generateQuestions(
+async function selectAgentBankQuestions(
   scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
   count: number,
   examType: "quiz" | "mid" | "final"
 ): Promise<Record<string, unknown>[]> {
-  const chapterIds = Array.isArray(scope) ? scope : [scope];
+  const chapterIds = Array.isArray(scope)
+    ? scope
+    : examType === "final"
+      ? (
+          await Chapter.find({ curriculum_id: scope })
+            .select("_id")
+            .lean()
+        ).map((chapter) => chapter._id)
+      : [scope];
   const random = isStandalone()
     ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727"))
     : Math.random;
 
   const pool: BankQuestion[] = [];
-  if (examType !== "final") {
-    for (const chapterId of chapterIds) {
-      pool.push(...(await bankQuestions(chapterId)));
-    }
+  for (const chapterId of chapterIds) {
+    pool.push(...(await bankQuestions(chapterId)));
   }
 
   if (!pool.length) {
-    return placeholderQuestions(count, examType);
+    throw new Error(
+      "Agent question bank is empty; Exam refuses to fabricate missing questions",
+    );
   }
 
   // At least 90% of every paper must be answerable from what the lecturer
@@ -260,14 +250,13 @@ export async function generateQuestions(
     ...sample(selfPool, selfCount, random),
   ];
 
-  return sample(picked, picked.length, random).map((question, index) => ({
-    question_id: `q_${index + 1}`,
-    prompt: question.prompt,
-    type: question.type,
-    options: question.options,
-    correct_option: question.correct_option,
-    source: question.source ?? "lecture",
-  }));
+  if (picked.length !== count) {
+    throw new Error(
+      `Agent question bank has ${picked.length} eligible questions; ${count} are required`,
+    );
+  }
+
+  return sample(picked, picked.length, random);
 }
 
 /* ------------------------------------------------------------------ */
@@ -303,7 +292,7 @@ export async function startQuiz(
   // stays proportional to the original 3-of-5.
   const questionCount = Math.min(30, Math.max(3, Math.floor(requestedCount ?? 5)));
   const passingMark = Math.max(1, Math.ceil(questionCount * 0.6));
-  const questions = await generateQuestions(
+  const questions = await selectAgentBankQuestions(
     chapter._id,
     questionCount,
     "quiz"
@@ -398,7 +387,21 @@ export async function startMid(
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "mid") throw new Error("Exam is not a mid");
-  if (studentSid) exam.student_sid = studentSid;
+  if (
+    !exam.published_midterm_id ||
+    !exam.blueprint_id ||
+    exam.blueprint_version === undefined ||
+    !exam.plan_version ||
+    !exam.package_id ||
+    !exam.package_version ||
+    !exam.package_hash ||
+    !exam.publication_key ||
+    !exam.published_at ||
+    !exam.questions_snapshot?.length
+  ) {
+    throw new Error("Midterm has no immutable published question package");
+  }
+  if (exam.taken) throw new Error("Midterm attempt is already finalized");
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
   const chapterIds = examChapters.map((ec) => ec.chapter_id);
@@ -412,48 +415,92 @@ export async function startMid(
     }
   }
 
-  const count = requestedCount
-    ? Math.min(60, Math.max(5, Math.floor(requestedCount)))
-    : Math.max(5, chapterIds.length * 3);
-  // Keep the pass bar proportional to the original 5-of-12.
-  exam.passing_mark = Math.max(1, Math.ceil(count * 0.4));
+  const count = exam.questions_snapshot.length;
+  if (requestedCount !== undefined && requestedCount !== count) {
+    throw new Error(
+      `Published midterm contains exactly ${count} questions; question_count cannot change it`,
+    );
+  }
 
-  exam.attempt_number = (exam.attempt_number || 0) + 1;
-  exam.generated_questions = await generateQuestions(chapterIds, count, "mid");
-  exam.student_answers = [];
-  exam.taken = false;
-  exam.mark = undefined;
-  exam.passed = false;
-  exam.grading_status = "auto_graded";
-  exam.integrity_status = "clean";
-  exam.policy_action = "none";
-  exam.review_status = "not_required";
-  exam.invalidated_at = undefined;
-  exam.invalidation_notified_at = undefined;
-  await exam.save();
+  const existingSession = await ExamSession.findOne({ exam_id: examIdObj });
+  if (existingSession) {
+    if (existingSession.status === "in_progress") return exam;
+    throw new Error("Midterm attempt cannot be restarted after finalization");
+  }
 
-  await ExamSession.deleteOne({ exam_id: examIdObj });
-  await ProctoringEvent.deleteMany({ exam_id: examIdObj });
+  const transactionSession = await mongoose.startSession();
+  try {
+    await transactionSession.withTransaction(async () => {
+      const concurrentSession = await ExamSession.findOne({
+        exam_id: examIdObj,
+      }).session(transactionSession);
+      if (concurrentSession) {
+        if (concurrentSession.status === "in_progress") return;
+        throw new Error("Midterm attempt cannot be restarted after finalization");
+      }
 
-  await ExamSession.create({
-    exam_id: examIdObj,
-    student_id: exam.student_id,
-    started_at: new Date(),
-    suspicion_score: 0,
-    flagged: false,
-    status: "in_progress",
-  });
+      if (studentSid && studentSid !== exam.student_sid) {
+        await Exam.updateOne(
+          { _id: examIdObj, published_midterm_id: exam.published_midterm_id },
+          { $set: { student_sid: studentSid } },
+          { session: transactionSession },
+        );
+        exam.student_sid = studentSid;
+      }
 
-  await writeAudit({
-    actor: { type: "student", id: exam.student_id.toString() },
-    action: "attempt.start",
-    resource: { type: "exam", id: exam._id.toString() },
-    metadata: {
-      exam_type: "mid",
-      attempt_number: exam.attempt_number,
-      question_count: count,
-    },
-  });
+      const startedAt = new Date();
+      await ExamSession.create(
+        [
+          {
+            exam_id: examIdObj,
+            student_id: exam.student_id,
+            started_at: startedAt,
+            suspicion_score: 0,
+            flagged: false,
+            status: "in_progress",
+          },
+        ],
+        { session: transactionSession },
+      );
+
+      const auditEntry = auditEntrySchema.parse({
+        schema_version: AUDIT_SCHEMA_VERSION,
+        occurred_at: startedAt,
+        actor: { type: "student", id: exam.student_id.toString() },
+        action: "attempt.start",
+        resource: { type: "exam", id: exam._id.toString() },
+        policy_version: INTEGRITY_POLICY_VERSION,
+        metadata: {
+          exam_type: "mid",
+          attempt_number: exam.attempt_number,
+          question_count: count,
+          package_id: exam.package_id,
+          package_version: exam.package_version,
+          package_hash: exam.package_hash,
+        },
+      });
+      await mongoose.connection.db!.collection("audit_logs").insertOne(
+        auditEntry,
+        { session: transactionSession },
+      );
+    });
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: number }).code === 11000
+    ) {
+      const concurrentSession = await ExamSession.findOne({
+        exam_id: examIdObj,
+        status: "in_progress",
+      });
+      if (concurrentSession) return exam;
+    }
+    throw error;
+  } finally {
+    await transactionSession.endSession();
+  }
 
   return exam;
 }
@@ -496,6 +543,7 @@ export async function createMid(
     type: "mid" as const,
     title,
     student_id: e.student_id,
+    curriculum_id: new mongoose.Types.ObjectId(curriculumId.toString()),
     attempt_number: 1,
     taken: false,
     passed: false,
@@ -555,7 +603,7 @@ export async function startFinal(
   const curriculum = await Curriculum.findById(curriculumIdObj);
   if (!curriculum) throw new Error("Curriculum not found");
 
-  const questions = await generateQuestions(curriculumIdObj, 10, "final");
+  const questions = await selectAgentBankQuestions(curriculumIdObj, 10, "final");
   const now = new Date();
 
   const exam = await Exam.create({
@@ -1080,5 +1128,20 @@ export function stripCorrectOption(
 }
 
 export function examToPlain(exam: { toObject?: () => Record<string, unknown> }): Record<string, unknown> {
-  return exam.toObject ? exam.toObject() : { ...exam };
+  const plain = exam.toObject ? exam.toObject() : { ...exam };
+  if (plain.type !== "mid") return plain;
+
+  const publicFields = [
+    "_id",
+    "type",
+    "title",
+    "taken",
+    "createdAt",
+    "updatedAt",
+  ];
+  return Object.fromEntries(
+    publicFields
+      .filter((field) => plain[field] !== undefined)
+      .map((field) => [field, plain[field]]),
+  );
 }
