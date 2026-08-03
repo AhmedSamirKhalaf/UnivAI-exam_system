@@ -59,6 +59,8 @@ jobs:
       - name: Run API integration tests
         run: node api_test.mjs
       - name: Run unit tests
-        run: npx vitest run tests/api tests/lib tests/ci
+        run: |
+          npx vitest run tests/api tests/lib/blueprint-validator.test.ts tests/lib/source-grounded-grading.test.ts tests/ci
+          npx tsx --test tests/lib/midterm-publication.test.ts tests/e2e/grounded-midterm.spec.ts
       - name: Check whitespace
         run: git diff --check
