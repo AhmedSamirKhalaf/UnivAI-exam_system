@@ -268,12 +268,14 @@ export async function saveCurrentAnswer(
 
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
   const session = await ExamSession.findOne({ exam_id: exam._id });
-  if (
-    !session ||
-    session.status !== "in_progress" ||
-    session.integrity_state !== "active"
-  ) {
+  if (!session || session.status !== "in_progress") {
     throw new ExamAttemptError("Exam session is not active", 409);
+  }
+  if (session.integrity_state === "integrity_locked") {
+    throw new ExamAttemptError(`Exam locked: ${session.integrity_lock_reason || 'Integrity violation'}`, 409);
+  }
+  if (session.integrity_state !== "active") {
+    throw new ExamAttemptError("Exam session is not active (reconnecting)", 409);
   }
 
   if (session.last_action_id === input.idempotency_key) {
@@ -330,12 +332,14 @@ export async function getServerStoredAnswers(
   if (!exam) throw new ExamAttemptError("Exam not found", 404);
   const session = await ExamSession.findOne({ exam_id: exam._id });
   const total = exam.generated_questions?.length ?? 0;
-  if (
-    !session ||
-    session.status !== "in_progress" ||
-    session.integrity_state !== "active"
-  ) {
+  if (!session || session.status !== "in_progress") {
     throw new ExamAttemptError("Exam session is not active", 409);
+  }
+  if (session.integrity_state === "integrity_locked") {
+    throw new ExamAttemptError(`Exam locked: ${session.integrity_lock_reason || 'Integrity violation'}`, 409);
+  }
+  if (session.integrity_state !== "active") {
+    throw new ExamAttemptError("Exam session is not active (reconnecting)", 409);
   }
   if (session.current_question_index < total) {
     throw new ExamAttemptError("Every question must be answered or skipped before submission", 409);

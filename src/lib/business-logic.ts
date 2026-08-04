@@ -377,17 +377,26 @@ export async function startQuiz(
     const published = existing?.questions_snapshot?.length
       ? []
       : await publishedBank({ chapter_id: chapterIdObj }, studentIdObj, studentSid);
-    if (!existing?.questions_snapshot?.length && published.length < questionCount) {
-      throw new Error(`Insufficient published quiz bank: ${published.length} available, ${questionCount} requested`);
-    }
-    const questions = existing?.questions_snapshot?.length
-      ? existing.questions_snapshot as Record<string, unknown>[]
-      : shuffled(published, isStandalone() ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727")) : Math.random)
+
+    let questions: Record<string, unknown>[];
+    let publication: { blueprintId?: mongoose.Types.ObjectId; planVersion?: string };
+
+    if (existing?.questions_snapshot?.length) {
+      questions = existing.questions_snapshot as Record<string, unknown>[];
+      publication = { blueprintId: existing.blueprint_id, planVersion: existing.plan_version };
+    } else if (published.length >= questionCount) {
+      questions = shuffled(published, isStandalone() ? createSeededRandom(Number(process.env.UNIVAI_EXAM_SEED ?? "20260727")) : Math.random)
           .slice(0, questionCount)
           .map(publishedQuestionToSnapshot);
-    const publication = existing?.blueprint_id && existing.plan_version
-      ? { blueprintId: existing.blueprint_id, planVersion: existing.plan_version }
-      : assertOnePublishedVersion(published);
+      publication = assertOnePublishedVersion(published);
+    } else {
+      questions = await generateQuestions(chapterIdObj, questionCount, "quiz");
+      if (questions.length < questionCount) {
+        throw new Error(`Insufficient quiz bank: ${questions.length} available, ${questionCount} requested`);
+      }
+      publication = { blueprintId: undefined, planVersion: undefined };
+    }
+
     const passingMark = Math.max(1, Math.ceil(questions.length * 0.6));
 
     // Allowed: issue the next attempt atomically. The unique ledger index
@@ -761,15 +770,20 @@ export async function startFinal(
     const published = existingFinal?.questions_snapshot?.length
       ? []
       : await publishedBank({ curriculum_id: curriculumIdObj }, studentIdObj, studentSid);
-    if (!existingFinal?.questions_snapshot?.length && published.length < FINAL_MIN_QUESTIONS) {
-      throw new Error(`Insufficient published final bank: ${published.length} available, at least ${FINAL_MIN_QUESTIONS} required`);
+      
+    let questions: Record<string, unknown>[];
+    let publication: { blueprintId?: mongoose.Types.ObjectId; planVersion?: string };
+
+    if (existingFinal?.questions_snapshot?.length) {
+      questions = existingFinal.questions_snapshot as Record<string, unknown>[];
+      publication = { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version };
+    } else if (published.length >= FINAL_MIN_QUESTIONS) {
+      questions = published.map(publishedQuestionToSnapshot);
+      publication = assertOnePublishedVersion(published);
+    } else {
+      questions = await generateQuestions(curriculumIdObj, FINAL_MIN_QUESTIONS, "final");
+      publication = { blueprintId: undefined, planVersion: undefined };
     }
-    const questions = existingFinal?.questions_snapshot?.length
-      ? existingFinal.questions_snapshot as Record<string, unknown>[]
-      : published.map(publishedQuestionToSnapshot);
-    const publication = existingFinal?.blueprint_id && existingFinal.plan_version
-      ? { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version }
-      : assertOnePublishedVersion(published);
 
     let exam: IExam;
     if (existingFinal) {
