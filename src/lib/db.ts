@@ -1,13 +1,5 @@
 import mongoose, { Mongoose } from "mongoose";
 
-const MONGODB_URI: string = process.env.MONGODB_URI ?? "";
-
-if (!MONGODB_URI) {
-  throw new Error(
-    "Please define the MONGODB_URI environment variable in .env.local"
-  );
-}
-
 interface MongooseCache {
   conn: Mongoose | null;
   promise: Promise<Mongoose> | null;
@@ -32,7 +24,14 @@ export async function connectDB(): Promise<Mongoose> {
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI, {
+    const mongodbUri = process.env.MONGODB_URI ?? "";
+    if (!mongodbUri) {
+      throw new Error(
+        "Please define the MONGODB_URI environment variable in .env.local"
+      );
+    }
+
+    cached.promise = mongoose.connect(mongodbUri, {
       bufferCommands: false,
     });
   }
