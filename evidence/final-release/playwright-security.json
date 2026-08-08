@@ -1,0 +1,448 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/home/youssef/Desktop/D/UnivAI-exam_system/node_modules/.bin/playwright",
+      "test",
+      "tests/security/public-release.spec.ts",
+      "--reporter=json"
+    ],
+    "rootDir": "/home/youssef/Desktop/D/UnivAI-exam_system",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/youssef/Desktop/D/UnivAI-exam_system/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/home/youssef/Desktop/D/UnivAI-exam_system",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 8,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "tests/security/public-release.spec.ts",
+      "file": "tests/security/public-release.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "final-release public security checks",
+          "file": "tests/security/public-release.spec.ts",
+          "line": 78,
+          "column": 15,
+          "specs": [
+            {
+              "title": "S1: protected capture and attempt routes reject a missing or invalid development identity",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 66,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.424Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-af7e64d01128d09afe65",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 87,
+              "column": 7
+            },
+            {
+              "title": "S2: malformed start payloads are rejected with 400",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 23,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.525Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-2aeee1d79922f07a9c88",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 104,
+              "column": 7
+            },
+            {
+              "title": "S3: malformed answer payloads are rejected with 400 without advancing the attempt",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 110,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.556Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-cd1d3c7cf8fe0f4f492c",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 124,
+              "column": 7
+            },
+            {
+              "title": "S4: answering a stale revision or a non-current question is rejected with 409",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 73,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.675Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-d37f80217f01f279da0d",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 188,
+              "column": 7
+            },
+            {
+              "title": "S5: replaying an idempotency key does not double-advance the attempt",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 80,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.758Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-d9ef895fa744e4deb621",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 248,
+              "column": 7
+            },
+            {
+              "title": "S6: submitting a taken exam again is rejected with 409",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 163,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:39.856Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-553646bddaeeb8375afa",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 289,
+              "column": 7
+            },
+            {
+              "title": "S7: unknown proctoring event types are rejected with 400",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 91,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:40.027Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-ca8d9d2dfd8260a61037",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 334,
+              "column": 7
+            },
+            {
+              "title": "S8: integrity messaging is non-accusatory in the public exam UI",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "environment-limitation",
+                      "description": "Browser-rendered exam UI could not be exercised: dev HMR websocket (/_next/webpack-hmr) fails under the custom server and hydration stalls at the loading state. Verified the API contract and the rendered UI source copy instead. See Model_Context/submission/known-issues.md."
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 40,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:40.129Z",
+                      "annotations": [
+                        {
+                          "type": "environment-limitation",
+                          "description": "Browser-rendered exam UI could not be exercised: dev HMR websocket (/_next/webpack-hmr) fails under the custom server and hydration stalls at the loading state. Verified the API contract and the rendered UI source copy instead. See Model_Context/submission/known-issues.md."
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-19565fef0eb2eab82014",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 351,
+              "column": 7
+            },
+            {
+              "title": "S9: no secrets are committed in tracked source or workflow files",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 18,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:40.179Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-85f07e0ba30967df9d1f",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 399,
+              "column": 7
+            },
+            {
+              "title": "S10: rate-limit enforcement is NOT VERIFIED on this release line",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "not-verified",
+                      "description": "Rate limiting is not implemented on this release line (defect UAI-M2-S2-11-01)."
+                    }
+                  ],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 147,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-08-02T16:05:40.209Z",
+                      "annotations": [
+                        {
+                          "type": "not-verified",
+                          "description": "Rate limiting is not implemented on this release line (defect UAI-M2-S2-11-01)."
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "c1c0f9d7b642368b05f0-b3956be2dd6cb729aaef",
+              "file": "tests/security/public-release.spec.ts",
+              "line": 428,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-02T16:05:38.965Z",
+    "duration": 1443.492,
+    "expected": 10,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
