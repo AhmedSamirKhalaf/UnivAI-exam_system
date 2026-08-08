@@ -40,7 +40,11 @@ const examTheme = createTheme({
   components: {
     MuiCssBaseline: {
       styleOverrides: {
-        body: { backgroundColor: "#F6F8FC" },
+        body: {
+          backgroundColor: "#F6F8FC",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+        },
       },
     },
     MuiAppBar: {

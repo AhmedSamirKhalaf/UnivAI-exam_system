@@ -24,4 +24,4 @@ curriculumSchema.index({ owner_student_id: 1 });
 
 export const Curriculum: Model<ICurriculum> =
   mongoose.models.Curriculum ||
-  mongoose.model<ICurriculum>("Curriculum", curriculumSchema);
+  mongoose.model<ICurriculum>("Curriculum", curriculumSchema, "curricula");

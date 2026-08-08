@@ -102,11 +102,11 @@ npm install
 npm run dev          # http://localhost:3200
 ```
 
-Needs **MongoDB on :27017** (the UnivAI repo's `make up` starts it) and
+Needs **MongoDB on :27018** (the UnivAI repo's `make up` starts it) and
 `.env.local` with:
 
 ```
-MONGODB_URI=mongodb://localhost:27017/univai_exams
+MONGODB_URI=mongodb://localhost:27018/univai_exams
 UNIVAI_APP_URL=http://localhost:3100    # where "Back to UnivAI" buttons return
 ```
 

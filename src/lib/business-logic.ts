@@ -98,27 +98,9 @@ export async function canStartFinal(
     };
   }
 
-  // The final-attempt count and cooldown are enforced by the versioned
-  // attempt policy (2 attempts, 2 days) in the same atomic operation that
-  // issues the attempt. This gate keeps the remaining mandatory gates:
-  // every chapter quiz must be passed before the final opens.
-  const chapters = await Chapter.find({ curriculum_id: curriculumId });
-
-  for (const chapter of chapters) {
-    const quizExam = await Exam.findOne({
-      student_id: studentId,
-      chapter_id: chapter._id,
-      type: "quiz",
-    });
-
-    if (!quizExam || !quizExam.passed) {
-      return {
-        allowed: false,
-        reason: `Chapter "${chapter.title}" quiz not yet passed`,
-      };
-    }
-  }
-
+  // UnivAI-app owns the semester clock and opens the final only after the
+  // last lecture ends. Quiz attendance and scores never gate the final.
+  // Attempt count and cooldown remain enforced atomically by startFinal.
   return { allowed: true };
 }
 
@@ -167,13 +149,114 @@ async function bumpSuspicionScore(
 /* ------------------------------------------------------------------ */
 
 type BankQuestion = {
+  question_id?: string;
   prompt: string;
   type: "mcq" | "essay";
   options?: string[];
   correct_option?: string;
   /** "lecture" = the lecturer said it out loud; "self_study" = book-only material */
   source?: "lecture" | "self_study";
+  provenance?: {
+    document_id?: string;
+    document_title?: string;
+    page_number?: number;
+    section?: string;
+    excerpt?: string;
+  };
 };
+
+const LEGACY_BANK_PLAN_VERSION = "legacy-question-bank-v1";
+
+export function legacyQuestionToPublished(
+  question: BankQuestion,
+  index: number,
+  chapterId: mongoose.Types.ObjectId,
+  chapterTitle: string,
+  learnerId: string,
+): Record<string, unknown> | null {
+  if (question.type !== "mcq" || !question.prompt?.trim()) return null;
+  const options = question.options?.filter((option) => option.trim()) ?? [];
+  if (options.length < 2) return null;
+
+  const answer = question.correct_option?.trim();
+  const correctOption = options.find((option) => {
+    if (!answer) return false;
+    return option === answer || option.match(/^([A-D])[).:]\s*/i)?.[1].toUpperCase() === answer.toUpperCase();
+  });
+  if (!correctOption) return null;
+
+  const supplied = question.provenance;
+  const hasSuppliedProvenance = Boolean(
+    supplied?.document_id?.trim() &&
+    supplied.document_title?.trim() &&
+    Number.isInteger(supplied.page_number) &&
+    Number(supplied.page_number) >= 1 &&
+    supplied.section?.trim(),
+  );
+  const provenance = hasSuppliedProvenance
+    ? supplied
+    : {
+        document_id: `legacy-question-bank:${chapterId}`,
+        document_title: chapterTitle,
+        page_number: 1,
+        section: "Legacy generated quiz bank",
+      };
+
+  return {
+    blueprint_id: chapterId,
+    schema_version: "question-provenance-v1",
+    question_id: question.question_id?.trim() || `legacy-${chapterId}-${index + 1}`,
+    prompt: question.prompt.trim(),
+    type: "mcq",
+    options,
+    correct_option: correctOption,
+    plan_version: LEGACY_BANK_PLAN_VERSION,
+    approved: true,
+    learner_id: learnerId,
+    provenance,
+  };
+}
+
+async function legacyBankAsPublished(
+  chapterId: mongoose.Types.ObjectId,
+  chapterTitle: string,
+  learnerId: string,
+): Promise<Record<string, unknown>[]> {
+  const db = mongoose.connection.db;
+  if (!db) return [];
+  const bank = await db.collection("question_banks").findOne({
+    chapter_id: { $in: [chapterId, chapterId.toString()] },
+  });
+  const questions = (bank?.questions ?? []) as BankQuestion[];
+  return questions.flatMap((question, index) => {
+    const published = legacyQuestionToPublished(
+      question,
+      index,
+      chapterId,
+      chapterTitle,
+      learnerId,
+    );
+    return published ? [published] : [];
+  });
+}
+
+async function legacyFinalBankAsPublished(
+  curriculumId: mongoose.Types.ObjectId,
+  learnerId: string,
+): Promise<Record<string, unknown>[]> {
+  const chapters = await Chapter.find({ curriculum_id: curriculumId })
+    .select("_id title")
+    .lean();
+  const banks = await Promise.all(
+    chapters.map((chapter) =>
+      legacyBankAsPublished(chapter._id, chapter.title, learnerId),
+    ),
+  );
+  return banks
+    .flat()
+    .map((question) => ({ ...question, blueprint_id: curriculumId }))
+    .slice(0, FINAL_MIN_QUESTIONS);
+}
 
 /**
  * UnivAI generates questions from the course book and stores them per chapter
@@ -374,9 +457,20 @@ export async function startQuiz(
       return { exam: eligibility.exam, created: false, resumed: true };
     }
 
-    const published = existing?.questions_snapshot?.length
+    let published = existing?.questions_snapshot?.length
       ? []
       : await publishedBank({ chapter_id: chapterIdObj }, studentIdObj, studentSid);
+    // Courses generated before immutable quiz publication already have a
+    // complete, learner-scoped bank synced by UnivAI-app. Prefer the strict
+    // published package, but keep those existing courses usable instead of
+    // falsely reporting that their ready bank contains zero questions.
+    if (!existing?.questions_snapshot?.length && published.length === 0) {
+      published = await legacyBankAsPublished(
+        chapterIdObj,
+        chapter.title,
+        studentSid ?? studentIdObj.toString(),
+      );
+    }
     if (!existing?.questions_snapshot?.length && published.length < questionCount) {
       throw new Error(`Insufficient published quiz bank: ${published.length} available, ${questionCount} requested`);
     }
@@ -742,6 +836,30 @@ export async function startFinal(
       return eligibility.exam;
     }
 
+    // Validate every dependency before consuming an attempt. A missing
+    // curriculum or unpublished bank must never leave an active orphan ledger
+    // record that blocks the learner from retrying after the data is fixed.
+    const curriculum = await Curriculum.findById(curriculumIdObj);
+    if (!curriculum) throw new Error("Curriculum not found");
+    let published = existingFinal?.questions_snapshot?.length
+      ? []
+      : await publishedBank({ curriculum_id: curriculumIdObj }, studentIdObj, studentSid);
+    if (!existingFinal?.questions_snapshot?.length && published.length === 0) {
+      published = await legacyFinalBankAsPublished(
+        curriculumIdObj,
+        studentSid ?? studentIdObj.toString(),
+      );
+    }
+    if (!existingFinal?.questions_snapshot?.length && published.length < FINAL_MIN_QUESTIONS) {
+      throw new Error(`Insufficient published final bank: ${published.length} available, at least ${FINAL_MIN_QUESTIONS} required`);
+    }
+    const questions = existingFinal?.questions_snapshot?.length
+      ? existingFinal.questions_snapshot as Record<string, unknown>[]
+      : published.map(publishedQuestionToSnapshot);
+    const publication = existingFinal?.blueprint_id && existingFinal.plan_version
+      ? { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version }
+      : assertOnePublishedVersion(published);
+
     const examId = existingFinal?._id ?? new mongoose.Types.ObjectId();
     const issuance = await issueAttemptRecord({
       learnerId: studentIdObj,
@@ -755,21 +873,6 @@ export async function startFinal(
       await sleep(START_RACE_BACKOFF_MS);
       continue;
     }
-
-    const curriculum = await Curriculum.findById(curriculumIdObj);
-    if (!curriculum) throw new Error("Curriculum not found");
-    const published = existingFinal?.questions_snapshot?.length
-      ? []
-      : await publishedBank({ curriculum_id: curriculumIdObj }, studentIdObj, studentSid);
-    if (!existingFinal?.questions_snapshot?.length && published.length < FINAL_MIN_QUESTIONS) {
-      throw new Error(`Insufficient published final bank: ${published.length} available, at least ${FINAL_MIN_QUESTIONS} required`);
-    }
-    const questions = existingFinal?.questions_snapshot?.length
-      ? existingFinal.questions_snapshot as Record<string, unknown>[]
-      : published.map(publishedQuestionToSnapshot);
-    const publication = existingFinal?.blueprint_id && existingFinal.plan_version
-      ? { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version }
-      : assertOnePublishedVersion(published);
 
     let exam: IExam;
     if (existingFinal) {

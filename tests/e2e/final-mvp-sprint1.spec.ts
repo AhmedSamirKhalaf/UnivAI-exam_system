@@ -188,7 +188,7 @@ test.describe.serial("Sprint 1 exam-facing black-box acceptance", () => {
     await expect(response.json()).resolves.toEqual({ success: true });
   });
 
-  test("G6: final exam remains locked until every quiz is passed", async ({
+  test("G6: quiz results never gate final-exam eligibility", async ({
     request,
   }) => {
     const enrollmentResponse = await request.post(`${BASE_URL}/api/enrollments`, {
@@ -210,9 +210,11 @@ test.describe.serial("Sprint 1 exam-facing black-box acceptance", () => {
       headers,
     });
 
-    expect(response.status()).toBe(403);
-    const body = await response.json();
-    expect(body.error).toMatch(/pass|quiz|chapter/i);
+    expect(response.status()).not.toBe(403);
+    if (!response.ok()) {
+      const body = await response.json();
+      expect(body.error).not.toMatch(/pass|quiz|chapter/i);
+    }
   });
 
   test("G7: submission produces a trusted-result webhook capture", async ({
