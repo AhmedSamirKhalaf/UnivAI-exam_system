@@ -169,6 +169,25 @@ type BankQuestion = {
 };
 
 const LEGACY_BANK_PLAN_VERSION = "legacy-question-bank-v1";
+const LEGACY_SIX_OPTION_COMPATIBILITY = [
+  "E) None of the other answers is correct",
+  "F) More than one of the other answers is correct",
+];
+
+function normalizedAssessmentOptions(
+  supplied: string[] | undefined,
+  expectedOptionCount: number,
+): string[] {
+  const cleaned = supplied?.map((option) => option.trim()).filter(Boolean) ?? [];
+  const options =
+    expectedOptionCount === 6 && cleaned.length === 4
+      ? [...cleaned, ...LEGACY_SIX_OPTION_COMPATIBILITY]
+      : cleaned;
+  return options.length === expectedOptionCount &&
+    new Set(options).size === expectedOptionCount
+    ? options
+    : [];
+}
 
 export function legacyQuestionToPublished(
   question: BankQuestion,
@@ -176,15 +195,21 @@ export function legacyQuestionToPublished(
   chapterId: mongoose.Types.ObjectId,
   chapterTitle: string,
   learnerId: string,
+  expectedOptionCount = 4,
 ): Record<string, unknown> | null {
   if (question.type !== "mcq" || !question.prompt?.trim()) return null;
-  const options = question.options?.filter((option) => option.trim()) ?? [];
-  if (options.length < 2) return null;
+  const options = normalizedAssessmentOptions(
+    question.options,
+    expectedOptionCount,
+  );
+  if (!options.length) return null;
 
   const answer = question.correct_option?.trim();
+  const allowedLabels = expectedOptionCount === 6 ? "A-F" : "A-D";
+  const optionLabel = new RegExp(`^([${allowedLabels}])[).:]\\s*`, "i");
   const correctOption = options.find((option) => {
     if (!answer) return false;
-    return option === answer || option.match(/^([A-D])[).:]\s*/i)?.[1].toUpperCase() === answer.toUpperCase();
+    return option === answer || option.match(optionLabel)?.[1].toUpperCase() === answer.toUpperCase();
   });
   if (!correctOption) return null;
 
@@ -224,6 +249,7 @@ async function legacyBankAsPublished(
   chapterId: mongoose.Types.ObjectId,
   chapterTitle: string,
   learnerId: string,
+  expectedOptionCount = 4,
 ): Promise<Record<string, unknown>[]> {
   const db = mongoose.connection.db;
   if (!db) return [];
@@ -238,6 +264,7 @@ async function legacyBankAsPublished(
       chapterId,
       chapterTitle,
       learnerId,
+      expectedOptionCount,
     );
     return published ? [published] : [];
   });
@@ -252,7 +279,7 @@ async function legacyFinalBankAsPublished(
     .lean();
   const banks = await Promise.all(
     chapters.map((chapter) =>
-      legacyBankAsPublished(chapter._id, chapter.title, learnerId),
+      legacyBankAsPublished(chapter._id, chapter.title, learnerId, 6),
     ),
   );
   return banks
@@ -285,6 +312,7 @@ function sample<T>(items: T[], count: number, random: RandomSource): T[] {
 
 function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final") {
   const questions: Record<string, unknown>[] = [];
+  const optionCount = examType === "quiz" ? 4 : 6;
   for (let i = 1; i <= count; i++) {
     if (examType === "final" && i % 3 === 0) {
       questions.push({
@@ -294,12 +322,17 @@ function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final")
         correct_option: undefined,
       });
     } else {
+      const options = Array.from(
+        { length: optionCount },
+        (_, optionIndex) =>
+          `${String.fromCharCode(65 + optionIndex)}) Option ${optionIndex + 1}`,
+      );
       questions.push({
         question_id: `q_${i}`,
         prompt: `Placeholder MCQ question ${i}?`,
         type: "mcq",
-        options: ["A) Option 1", "B) Option 2", "C) Option 3", "D) Option 4"],
-        correct_option: String.fromCharCode(65 + (i % 4)),
+        options,
+        correct_option: options[i % optionCount],
       });
     }
   }
@@ -327,12 +360,36 @@ export async function generateQuestions(
     return placeholderQuestions(count, examType);
   }
 
+  const expectedOptionCount = examType === "quiz" ? 4 : 6;
+  const eligiblePool = pool.flatMap((question) => {
+    if (question.type !== "mcq") return [question];
+    const options = normalizedAssessmentOptions(
+      question.options,
+      expectedOptionCount,
+    );
+    if (!options.length) return [];
+    const answer = question.correct_option?.trim();
+    const lastLabel = expectedOptionCount === 6 ? "F" : "D";
+    const optionLabel = new RegExp(`^([A-${lastLabel}])[).:]\\s*`, "i");
+    const correctOption = options.find(
+      (option) =>
+        option === answer ||
+        option.match(optionLabel)?.[1].toUpperCase() === answer?.toUpperCase(),
+    );
+    return correctOption
+      ? [{ ...question, options, correct_option: correctOption }]
+      : [];
+  });
+  if (!eligiblePool.length) {
+    return placeholderQuestions(count, examType);
+  }
+
   // At least 90% of every paper must be answerable from what the lecturer
   // actually said; "self_study" questions (book material beyond the lecture)
   // can NEVER exceed 10% of the paper. A 5-question quiz therefore carries
   // none; the 12-question mid carries exactly one.
-  const selfPool = pool.filter((q) => q.source === "self_study");
-  const taughtPool = pool.filter((q) => q.source !== "self_study");
+  const selfPool = eligiblePool.filter((q) => q.source === "self_study");
+  const taughtPool = eligiblePool.filter((q) => q.source !== "self_study");
   const selfCount = Math.min(selfPool.length, Math.floor(count * 0.1));
 
   const picked = [

@@ -54,7 +54,14 @@ function question(
     question_id: questionId,
     prompt: `Grounded prompt ${questionId}`,
     type: "mcq" as const,
-    options: ["Correct", "Incorrect"],
+    options: [
+      "Correct",
+      "Incorrect one",
+      "Incorrect two",
+      "Incorrect three",
+      "Incorrect four",
+      "Incorrect five",
+    ],
     correct_option: "Correct",
     plan_version: "plan-2026-v4",
     provenance: {

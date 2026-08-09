@@ -62,6 +62,14 @@ test("the attempt policy is announced before the learner can start", () => {
   assert.match(runner, /exam\.attempt_statement && exam\.attempt_policy/);
 });
 
+test("the negative-marking rule is visible before the learner starts", () => {
+  const scoringNotice = runner.indexOf("Correct: +1. Wrong: -1. Blank or skipped: 0.");
+  const startButton = runner.indexOf("Enter fullscreen and start");
+  assert.ok(scoringNotice !== -1 && startButton !== -1);
+  assert.ok(scoringNotice < startButton);
+  assert.match(runner, /total can never fall below 0/);
+});
+
 test("a cooldown or exhausted attempt shows a blocked card instead of the start screen", () => {
   // The blocked branch is gated on the server-decision snapshot and returns
   // before the readiness screen is ever rendered.

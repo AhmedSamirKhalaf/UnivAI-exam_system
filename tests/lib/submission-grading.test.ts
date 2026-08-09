@@ -81,4 +81,28 @@ describe("final submission grading", () => {
       integrity_status: "invalidated",
     });
   });
+
+  test("subtracts wrong answers, ignores blanks, and floors the total at zero", () => {
+    const exam = finalExam(objectiveQuestions, { passing_mark: 1 });
+
+    gradeExamSubmission(exam, [
+      { question_id: "q1", answer: "A" },
+      { question_id: "q2", answer: "wrong" },
+    ]);
+    expect(exam).toMatchObject({ mark: 0, passed: false });
+
+    const blankExam = finalExam(objectiveQuestions, { passing_mark: 1 });
+    gradeExamSubmission(blankExam, [
+      { question_id: "q1", answer: "A" },
+      { question_id: "q2", answer: "" },
+    ]);
+    expect(blankExam).toMatchObject({ mark: 1, passed: true });
+
+    const allWrong = finalExam(objectiveQuestions, { passing_mark: 1 });
+    gradeExamSubmission(allWrong, [
+      { question_id: "q1", answer: "wrong" },
+      { question_id: "q2", answer: "also wrong" },
+    ]);
+    expect(allWrong).toMatchObject({ mark: 0, passed: false });
+  });
 });

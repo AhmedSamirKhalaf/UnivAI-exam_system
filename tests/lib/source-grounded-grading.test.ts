@@ -1,4 +1,3 @@
-// @ts-expect-error Vitest is supplied by the issue's mandatory npx command.
 import { describe, expect, test } from "vitest";
 import mongoose from "mongoose";
 import {
@@ -116,8 +115,49 @@ describe("source-grounded grading", () => {
 
     await exam.validate();
 
-    expect(exam.mark).toBe(1);
+    expect(exam.mark).toBe(0);
     expect(exam.passed).toBe(false);
+  });
+
+  test("uses +1 correct, -1 wrong, 0 blank and floors the paper at zero", () => {
+    const balanced = gradeQuestionSnapshot(
+      publishedQuestions,
+      [
+        { question_id: "q_tree_01", answer: "2^(h+1) - 1" },
+        { question_id: "q_bfs_01", answer: "Stack" },
+      ],
+      1,
+      "clean",
+    );
+    expect(balanced.mark).toBe(0);
+
+    const blank = gradeQuestionSnapshot(
+      publishedQuestions,
+      [
+        { question_id: "q_tree_01", answer: "" },
+        { question_id: "q_bfs_01", answer: "Queue" },
+      ],
+      1,
+      "clean",
+    );
+    expect(blank.mark).toBe(1);
+
+    const allWrong = gradeQuestionSnapshot(
+      publishedQuestions,
+      [
+        { question_id: "q_tree_01", answer: "h^2" },
+        { question_id: "q_bfs_01", answer: "Stack" },
+      ],
+      1,
+      "clean",
+    );
+    expect(allWrong.mark).toBe(0);
+  });
+
+  test("allows every answer to be blank", () => {
+    const grade = gradeQuestionSnapshot(publishedQuestions, [], 1, "clean");
+
+    expect(grade).toMatchObject({ mark: 0, passed: false });
   });
 
   test("unknown question IDs are rejected", () => {

@@ -1,4 +1,3 @@
-// @ts-expect-error Vitest is supplied by the issue's mandatory npx command.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import mongoose from "mongoose";
 

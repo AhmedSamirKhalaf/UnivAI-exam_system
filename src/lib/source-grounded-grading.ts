@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { z } from "zod";
 import type { IExam } from "../models/Exam";
+import { scoreObjectiveAnswers } from "./objective-scoring";
 import {
   questionProvenanceSchema,
   type QuestionProvenanceInput,
@@ -12,8 +13,7 @@ const studentAnswersSchema = z
       question_id: z.string().trim().min(1),
       answer: z.string(),
     }),
-  )
-  .min(1);
+  );
 
 export interface StudentAnswerInput {
   question_id: string;
@@ -108,16 +108,7 @@ export function gradeQuestionSnapshot(
     throw new Error(`Student answer references unknown question "${unknownId}"`);
   }
 
-  let mark = 0;
-  for (const answer of answers) {
-    const question = questionsById.get(answer.question_id)!;
-    if (
-      question.type === "mcq" &&
-      answer.answer === question.correct_option
-    ) {
-      mark += 1;
-    }
-  }
+  const { mark } = scoreObjectiveAnswers(questions, answers);
 
   const hasEssay = questions.some((question) => question.type === "essay");
   const gradingStatus = hasEssay ? "pending_review" : "auto_graded";

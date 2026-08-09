@@ -19,6 +19,7 @@ const objectIdText = z
   .string()
   .refine((value) => mongoose.isValidObjectId(value), "Expected a Mongo ObjectId");
 const sha256Text = z.string().regex(/^[a-f0-9]{64}$/, "Expected a lowercase SHA-256 hash");
+export const MIDTERM_PACKAGE_OPTION_COUNT = 6;
 
 const scopedChapterSchema = z
   .object({
@@ -34,7 +35,7 @@ export const midtermPackageQuestionV1Schema = z
     question_id: requiredText,
     prompt: requiredText,
     type: z.enum(["mcq", "essay"]),
-    options: z.array(requiredText).min(2).max(12).optional(),
+    options: z.array(requiredText).length(MIDTERM_PACKAGE_OPTION_COUNT).optional(),
     correct_option: requiredText.optional(),
     plan_version: requiredText,
     provenance: z
@@ -58,11 +59,17 @@ export const midtermPackageQuestionV1Schema = z
   .strict()
   .superRefine((question, context) => {
     if (question.type === "mcq") {
-      if (!question.options || question.options.length < 2) {
+      if (!question.options) {
         context.addIssue({
           code: "custom",
           path: ["options"],
-          message: "MCQ questions require at least two options",
+          message: `Midterm MCQs require exactly ${MIDTERM_PACKAGE_OPTION_COUNT} options`,
+        });
+      } else if (new Set(question.options).size !== question.options.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["options"],
+          message: "Midterm MCQ options must be unique",
         });
       } else if (
         !question.correct_option ||

@@ -1,4 +1,5 @@
 import type { ExamType, GradingStatus, IntegrityStatus } from "../models/Exam";
+import { scoreObjectiveAnswers } from "./objective-scoring";
 
 interface SubmissionGradingTarget {
   type: ExamType;
@@ -34,24 +35,12 @@ export function gradeExamSubmission(
   }
 
   const questions = exam.generated_questions ?? [];
-  let correctCount = 0;
+  const score = scoreObjectiveAnswers(questions, studentAnswers);
 
-  for (const answer of studentAnswers) {
-    const question = questions.find(
-      (candidate) => candidate.question_id === answer.question_id,
-    );
-    if (
-      question?.type === "mcq" &&
-      answer.answer === question.correct_option
-    ) {
-      correctCount += 1;
-    }
-  }
-
-  exam.mark = correctCount;
+  exam.mark = score.mark;
   exam.passing_mark ??= Math.max(1, Math.ceil(questions.length * 0.6));
   exam.passed =
     exam.integrity_status !== "invalidated" &&
-    correctCount >= exam.passing_mark;
+    score.mark >= exam.passing_mark;
   exam.grading_status = "auto_graded";
 }

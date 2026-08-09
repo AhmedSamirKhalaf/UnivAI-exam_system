@@ -1,4 +1,3 @@
-// @ts-expect-error Vitest is supplied by the issue's mandatory npx command.
 import { describe, expect, test } from "vitest";
 import {
   publishQuestions,

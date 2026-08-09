@@ -663,6 +663,10 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                     </ListItem>
                     <ListItem disableGutters>
                       <ListItemIcon><CheckCircleOutlineRounded color="primary" /></ListItemIcon>
+                      <ListItemText primary="Know the MCQ scoring" secondary="Correct: +1. Wrong: -1. Blank or skipped: 0. Your total can never fall below 0." />
+                    </ListItem>
+                    <ListItem disableGutters>
+                      <ListItemIcon><CheckCircleOutlineRounded color="primary" /></ListItemIcon>
                       <ListItemText primary="Wait for saved confirmation" secondary="Move forward only after the answer is safely stored on the server." />
                     </ListItem>
                   </List>

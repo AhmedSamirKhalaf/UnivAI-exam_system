@@ -23,6 +23,7 @@ import {
  */
 
 export const FINAL_PACKAGE_SCHEMA_VERSION = "final-package-v1";
+export const FINAL_PACKAGE_OPTION_COUNT = 6;
 export const PUBLICATION_RECEIPT_SCHEMA_VERSION = "publication-receipt-v1";
 
 export const FINAL_PACKAGE_MIN_QUESTIONS = 10;
@@ -109,18 +110,24 @@ const finalQuestionSchema = z
     type: z.enum(["mcq", "essay"]),
     week: requiredText,
     difficulty: z.enum(["easy", "medium", "hard"]),
-    options: z.array(requiredText).optional(),
+    options: z.array(requiredText).length(FINAL_PACKAGE_OPTION_COUNT).optional(),
     correct_option: requiredText.optional(),
     provenance: provenanceSourceSchema,
     question_hash: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .superRefine((question, context) => {
     if (question.type === "mcq") {
-      if (!question.options || question.options.length < 2) {
+      if (!question.options) {
         context.addIssue({
           code: "custom",
           path: ["options"],
-          message: "MCQ questions require at least two options",
+          message: `Final MCQs require exactly ${FINAL_PACKAGE_OPTION_COUNT} options`,
+        });
+      } else if (new Set(question.options).size !== question.options.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["options"],
+          message: "Final MCQ options must be unique",
         });
       } else if (
         !question.correct_option ||
