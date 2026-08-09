@@ -256,6 +256,13 @@ export async function gradeAssessmentServerSide(
         submitted_at: submittedAt,
         submission_idempotency_key: normalizedKey,
         integrity_metadata: integrity,
+        result_webhook_attempts: 0,
+        result_webhook_next_attempt_at: submittedAt,
+      },
+      $inc: { result_webhook_version: 1 },
+      $unset: {
+        result_webhook_locked_until: "",
+        result_webhook_last_error: "",
       },
     },
             { returnDocument: "after", runValidators: true },

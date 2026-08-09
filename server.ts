@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import next from "next";
 import { attachIntegrityWebSocketServer } from "./src/lib/integrity-socket";
+import { startResultWebhookRetryWorker } from "./src/lib/report-webhook";
 
 const mode = process.argv[2] ?? "dev";
 const dev = mode !== "start";
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
   });
 
   attachIntegrityWebSocketServer(server, upgradeHandler);
+  const stopResultWebhookRetryWorker = startResultWebhookRetryWorker();
+  server.on("close", stopResultWebhookRetryWorker);
 
   server.listen(port, hostname, () => {
     console.log(`UnivAI Exams listening on http://${hostname}:${port}`);

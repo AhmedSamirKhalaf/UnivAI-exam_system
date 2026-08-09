@@ -19,6 +19,7 @@ export const resultWebhookSchema = z.object({
   chapter_id: z.string().length(24).nullable(),
   mark: z.number().nullable(),
   total_questions: z.number().int().min(0),
+  max_score: z.number().int().min(0),
   passing_mark: z.number().nullable(),
   passed: z.boolean(),
   grading_status: z.enum(["auto_graded", "pending_review", "graded"]),

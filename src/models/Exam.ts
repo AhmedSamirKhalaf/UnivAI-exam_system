@@ -48,6 +48,12 @@ export interface IExam extends Document {
   review_status: ReviewStatus;
   invalidated_at?: Date;
   invalidation_notified_at?: Date;
+  result_webhook_version: number;
+  result_webhook_delivered_version: number;
+  result_webhook_attempts: number;
+  result_webhook_next_attempt_at?: Date;
+  result_webhook_locked_until?: Date;
+  result_webhook_last_error?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -127,6 +133,27 @@ const examSchema = new Schema<IExam>(
     },
     invalidated_at: { type: Date },
     invalidation_notified_at: { type: Date },
+    result_webhook_version: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+    result_webhook_delivered_version: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+    result_webhook_attempts: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+    result_webhook_next_attempt_at: { type: Date },
+    result_webhook_locked_until: { type: Date },
+    result_webhook_last_error: { type: String },
   },
   { timestamps: true, versionKey: false }
 );
@@ -268,6 +295,7 @@ examSchema.index(
 );
 
 examSchema.index({ student_id: 1, type: 1 });
+examSchema.index({ result_webhook_next_attempt_at: 1 });
 
 export const Exam: Model<IExam> =
   mongoose.models.Exam || mongoose.model<IExam>("Exam", examSchema);

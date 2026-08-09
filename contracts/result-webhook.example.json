@@ -7,6 +7,7 @@
   "chapter_id": "64b000000000000000000012",
   "mark": 5,
   "total_questions": 5,
+  "max_score": 5,
   "passing_mark": 3,
   "passed": true,
   "grading_status": "auto_graded",

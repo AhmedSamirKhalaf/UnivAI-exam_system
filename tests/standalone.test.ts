@@ -25,6 +25,7 @@ test("canonical result webhook validates and uses non-guilt policy terms", async
   const parsed = resultWebhookSchema.parse(fixture);
   assert.equal(parsed.policy_action, "none");
   assert.equal(parsed.review_status, "not_required");
+  assert.equal(parsed.max_score, 5);
   assert.equal(JSON.stringify(parsed).toLowerCase().includes("cheat"), false);
 });
 
@@ -49,6 +50,7 @@ test("invalid proctoring event is rejected", () => {
     chapter_id: null,
     mark: null,
     total_questions: 0,
+    max_score: 0,
     passing_mark: null,
     passed: false,
     grading_status: "auto_graded",

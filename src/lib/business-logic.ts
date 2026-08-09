@@ -27,6 +27,9 @@ import {
 } from "@/lib/deterministic-rng";
 import { isStandalone } from "@/lib/runtime";
 import { INTEGRITY_POLICY_VERSION, writeAudit } from "@/lib/audit-log";
+import { gradeExamSubmission } from "@/lib/submission-grading";
+import { sendResultWebhook } from "@/lib/report-webhook";
+import { queueResultWebhookRevision } from "@/lib/result-webhook-state";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -856,6 +859,9 @@ export async function startFinal(
     const questions = existingFinal?.questions_snapshot?.length
       ? existingFinal.questions_snapshot as Record<string, unknown>[]
       : published.map(publishedQuestionToSnapshot);
+    const passingMark = questions.every((question) => question.type === "mcq")
+      ? Math.max(1, Math.ceil(questions.length * 0.6))
+      : 50;
     const publication = existingFinal?.blueprint_id && existingFinal.plan_version
       ? { blueprintId: existingFinal.blueprint_id, planVersion: existingFinal.plan_version }
       : assertOnePublishedVersion(published);
@@ -879,7 +885,7 @@ export async function startFinal(
       await resetExamForAttempt(
         existingFinal,
         questions,
-        undefined,
+        passingMark,
         issuance.record.attempt_number,
         studentSid,
       );
@@ -900,6 +906,7 @@ export async function startFinal(
           generated_questions: questions,
           student_answers: [],
           taken: false,
+          passing_mark: passingMark,
           passed: false,
           grading_status: "auto_graded",
           integrity_status: "clean",
@@ -1174,16 +1181,8 @@ export async function submitExam(
   exam.student_answers = studentAnswers;
   exam.taken = true;
 
-  if (exam.type === "quiz" || exam.type === "mid") {
-    autoGrade(exam, studentAnswers);
-    exam.grading_status = "auto_graded";
-  } else {
-    exam.grading_status = "pending_review";
-  }
-
-  if (exam.integrity_status === "invalidated") {
-    exam.passed = false;
-  }
+  gradeExamSubmission(exam, studentAnswers);
+  queueResultWebhookRevision(exam);
 
   await exam.save();
 
@@ -1227,31 +1226,6 @@ export async function submitExam(
   return exam;
 }
 
-function autoGrade(
-  exam: IExam,
-  studentAnswers: Record<string, unknown>[]
-): void {
-  const questions = (exam.generated_questions ||
-    []) as Record<string, unknown>[];
-  let correctCount = 0;
-
-  for (const answer of studentAnswers) {
-    const question = questions.find(
-      (q) => q.question_id === answer.question_id
-    );
-    if (question && question.type === "mcq") {
-      if (answer.answer === question.correct_option) {
-        correctCount++;
-      }
-    }
-  }
-
-  exam.mark = correctCount;
-  if (exam.passing_mark !== undefined) {
-    exam.passed = correctCount >= exam.passing_mark;
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /*   gradeFinal — manual grading                                       */
 /* ------------------------------------------------------------------ */
@@ -1262,11 +1236,30 @@ export async function gradeFinal(
   gradedBy: string,
   reason?: string,
   isRegrade: boolean = false
-): Promise<void> {
+): Promise<IExam> {
   const exam = await Exam.findById(examId);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "final") {
     throw new Error("gradeFinal can only be used on final exams");
+  }
+  if (
+    exam.grading_status !== "pending_review" &&
+    !(isRegrade && exam.grading_status === "graded")
+  ) {
+    throw new Error("Exam is not pending review");
+  }
+
+  const maximumMark = 100;
+  if (!Number.isInteger(mark) || mark < 0 || mark > maximumMark) {
+    throw new Error(`Final mark must be an integer from 0 to ${maximumMark}`);
+  }
+  if (
+    exam.passing_mark === undefined ||
+    !Number.isFinite(exam.passing_mark) ||
+    exam.passing_mark < 0 ||
+    exam.passing_mark > maximumMark
+  ) {
+    throw new Error("Final exam has no valid stored passing mark");
   }
 
   const now = new Date();
@@ -1280,13 +1273,11 @@ export async function gradeFinal(
     reason: reason || (isRegrade ? "regrade" : "initial grade"),
   });
 
-  if (exam.grading_status !== "pending_review") {
-    throw new Error("Exam is not pending review");
-  }
-
   exam.mark = mark;
-  exam.passed = mark >= 50;
+  exam.passed =
+    exam.integrity_status !== "invalidated" && mark >= exam.passing_mark;
   exam.grading_status = "graded";
+  queueResultWebhookRevision(exam, now);
   await exam.save();
 
   await writeAudit({
@@ -1295,11 +1286,17 @@ export async function gradeFinal(
     resource: { type: "exam", id: exam._id.toString() },
     metadata: {
       mark,
-      passed: mark >= 50,
+      passed: exam.passed,
       is_regrade: isRegrade,
       reason: reason || (isRegrade ? "regrade" : "initial grade"),
     },
   });
+
+  // The save above durably marks this result revision for callback delivery.
+  // The retry worker owns transient callback failures without rolling back the
+  // instructor's trusted grade.
+  await sendResultWebhook(exam);
+  return exam;
 }
 
 /* ------------------------------------------------------------------ */

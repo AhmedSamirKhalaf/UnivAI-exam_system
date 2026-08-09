@@ -114,6 +114,6 @@ git diff --check
   shared store (Redis or similar) before windows are meaningful across nodes.
 - The audit sink and idempotency store are MongoDB-backed and require the
   connection to be established before use (routes call `connectDB()` first).
-- `RESULT_WEBHOOK_URL` delivery is fire-and-forget; the app must poll
-  `GET /api/exams/[examId]` as a fallback. Idempotency keys prevent duplicate
-  result callbacks.
+- Result changes and their callback revision are saved together on the exam.
+  `RESULT_WEBHOOK_URL` delivery retries from MongoDB with a stable idempotency
+  key; the app can still poll `GET /api/exams/[examId]` as a fallback.
