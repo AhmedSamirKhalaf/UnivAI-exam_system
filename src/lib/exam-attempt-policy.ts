@@ -5,7 +5,7 @@ import {
 } from "@/models/ExamAttemptRecord";
 import type { AttemptTerminalStatus } from "@/models/ExamAttemptRecord";
 import { ExamSession, type IExamSession } from "@/models/ExamSession";
-import type { IExam } from "@/models/Exam";
+import { Exam, type IExam } from "@/models/Exam";
 
 export type { AttemptTerminalStatus };
 
@@ -20,10 +20,10 @@ export type { AttemptTerminalStatus };
  *   Assessment  Maximum attempts  Minimum wait before the next attempt
  *   Quiz        2                 3 hours
  *   Midterm     3                 5 hours
- *   Final       2                 2 days (48 hours)
+ *   Final       2                 7 days (reserve form; app approval required)
  */
 
-export const ATTEMPT_POLICY_VERSION = "univai-exam-attempt-policy-v1";
+export const ATTEMPT_POLICY_VERSION = "univai-exam-attempt-policy-v2";
 
 const HOUR_SECONDS = 60 * 60;
 const DAY_SECONDS = 24 * HOUR_SECONDS;
@@ -34,7 +34,7 @@ export const EXAM_ATTEMPT_POLICY: Record<
 > = {
   quiz: { max_attempts: 2, cooldown_seconds: 3 * HOUR_SECONDS },
   mid: { max_attempts: 3, cooldown_seconds: 5 * HOUR_SECONDS },
-  final: { max_attempts: 2, cooldown_seconds: 2 * DAY_SECONDS },
+  final: { max_attempts: 2, cooldown_seconds: 7 * DAY_SECONDS },
 };
 
 export type AttemptAssessmentType = "quiz" | "mid" | "final";
@@ -83,7 +83,7 @@ export function attemptPolicyStatement(type: AttemptAssessmentType): string {
     case "mid":
       return "Midterm: 3 attempts, 5 hours";
     case "final":
-      return "Final: 2 attempts, 2 days";
+      return "Final: primary form plus an approved reserve-form retake after 7 days";
   }
 }
 
@@ -505,6 +505,63 @@ export type StartEligibility =
   | { kind: "blocked"; snapshot: AttemptPolicySnapshot; basedOnAttemptNumber: number };
 
 /**
+ * Reconcile the latest active ledger record even when the caller is trying to
+ * launch a different form. Without this, a primary form abandoned before its
+ * deadline could remain active forever and block an approved reserve form.
+ */
+async function reconcileActiveHistory(
+  history: IExamAttemptRecord[],
+  suppliedExam: IExam | null,
+  now: Date,
+): Promise<boolean> {
+  const activeRecord = [...history]
+    .reverse()
+    .find((record) => record.status === "active");
+  if (!activeRecord) return false;
+
+  const sourceMatchesSupplied =
+    suppliedExam?._id.toString() === activeRecord.source_exam_id.toString();
+  const sourceExam = sourceMatchesSupplied
+    ? suppliedExam
+    : await Exam.findById(activeRecord.source_exam_id);
+  if (!sourceExam) return false;
+
+  const session = await ExamSession.findOne({ exam_id: sourceExam._id });
+  const finalDeadline = sourceExam.type === "final" ? sourceExam.access_expires_at : undefined;
+  if (finalDeadline && now.getTime() >= finalDeadline.getTime()) {
+    if (session?.status === "in_progress") {
+      await ExamSession.updateOne(
+        { _id: session._id, status: "in_progress" },
+        {
+          $set: {
+            status: "terminated",
+            terminated_reason: "timeout",
+            ended_at: finalDeadline,
+            integrity_state: "submitted",
+          },
+          $unset: { access_token_hash: "", active_connection_id: "" },
+        },
+      );
+    }
+    return finalizeAttemptRecord(
+      activeRecord,
+      "timed_out",
+      finalDeadline,
+      buildTerminalEvidence(sourceExam, session ?? null),
+    );
+  }
+
+  const terminal = deriveTerminalStatus(sourceExam, session ?? null);
+  if (terminal === "active") return false;
+  return finalizeAttemptRecord(
+    activeRecord,
+    terminal,
+    session?.ended_at ?? now,
+    buildTerminalEvidence(sourceExam, session ?? null),
+  );
+}
+
+/**
  * Evaluate whether a learner may start. Reconciles server-terminalized
  * sessions (browser close is never a refund), derives legacy attempts, and
  * decides allow / resume / block using only the server clock.
@@ -536,25 +593,8 @@ export async function evaluateStart(
     }
   }
 
-  if (exam) {
-    const activeRecord = history.find(
-      (record) =>
-        record.source_exam_id.toString() === exam._id.toString() &&
-        record.status === "active",
-    );
-    if (activeRecord) {
-      const session = await ExamSession.findOne({ exam_id: exam._id });
-      const terminal = deriveTerminalStatus(exam, session ?? null);
-      if (terminal !== "active") {
-        await finalizeAttemptRecord(
-          activeRecord,
-          terminal,
-          session?.ended_at ?? now,
-          buildTerminalEvidence(exam, session ?? null),
-        );
-        history = await getAttemptHistory(learnerObj, type, assessmentObj);
-      }
-    }
+  if (await reconcileActiveHistory(history, exam, now)) {
+    history = await getAttemptHistory(learnerObj, type, assessmentObj);
   }
 
   const snapshot = evaluateAttemptPolicy(
@@ -564,7 +604,12 @@ export async function evaluateStart(
   );
 
   if (!snapshot.can_start) {
-    if (snapshot.reason_code === "attempt_active" && exam) {
+    const activeRecord = history.find((record) => record.status === "active");
+    if (
+      snapshot.reason_code === "attempt_active" &&
+      exam &&
+      activeRecord?.source_exam_id.toString() === exam._id.toString()
+    ) {
       const session = await ExamSession.findOne({ exam_id: exam._id });
       if (session && session.status === "in_progress") {
         return { kind: "resume", snapshot, exam, session };

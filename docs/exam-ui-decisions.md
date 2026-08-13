@@ -2,6 +2,10 @@
 
 The exam UI follows one visible road: rules, browser readiness, secure connection, one current question, server save confirmation, final submit, and result or review entry. It is built from MUI components and one centralized theme; there are no custom CSS files, `sx`, or `styled()` calls.
 
+The website shell is available in English and Arabic. `uiLocale` takes priority over `lang` on an incoming URL, a valid choice is persisted in a secure HTTP-only preference cookie, and the surrounding document and MUI theme switch between LTR and RTL. Exam titles, generated prompts, answer options, and other generated assessment content remain immutable English content islands marked `lang="en" dir="ltr"`; localization never rewrites assessment material.
+
+The accessibility measures below are foundations for WCAG 2.2 AAA readiness, not a certification or a claim that every AAA success criterion is satisfied. Conformance still requires complete automated and manual audits, including assistive-technology and accommodation testing.
+
 ## Components and behavior
 
 | State | MUI components | Exact behavior |
@@ -20,15 +24,16 @@ Status messages follow [WCAG 2.2 status messages](https://www.w3.org/WAI/WCAG22/
 | Purpose | Foreground | Background | Checked ratio |
 |---|---:|---:|---:|
 | Main text | `#172033` | `#FFFFFF` | 16.27:1 |
-| Secondary text | `#526079` | `#FFFFFF` | 6.35:1 |
+| Secondary text | `#44516A` | `#FFFFFF` | 7.98:1 |
 | Primary action | `#FFFFFF` | `#2847C7` | 7.46:1 |
-| Success | `#0B6B3A` | `#EAF8F0` | 6.04:1 |
-| Warning | `#8A4B00` | `#FFF4E5` | 6.26:1 |
-| Error or lock | `#B42318` | `#FFF1F0` | 5.98:1 |
-| Information | `#175CD3` | `#EFF4FF` | 5.43:1 |
-| Keyboard focus | `#7F56D9` | `#FFFFFF` | 4.96:1 |
+| Success | `#075A31` | `#EAF8F0` | 7.63:1 |
+| Warning | `#6B3900` | `#FFF4E5` | 8.74:1 |
+| Error or lock | `#8A1C13` | `#FFF1F0` | 8.46:1 |
+| Information | `#0E4691` | `#EFF4FF` | 8.27:1 |
+| Keyboard focus | `#512DA8` | `#FFFFFF` | 9.17:1 |
+| Essential boundary | `#667085` | `#FFFFFF` | 4.98:1 |
 
-The focus indicator is a three-pixel outline with an offset. These choices exceed WCAG AA's 4.5:1 normal-text and 3:1 user-interface boundaries: [contrast minimum](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html), [non-text contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html), and [focus visible](https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html).
+The focus indicator is a three-pixel outline with an offset. The listed normal-text pairs reach the 7:1 enhanced-contrast target, while essential boundaries exceed 3:1: [contrast enhanced](https://www.w3.org/WAI/WCAG22/Understanding/contrast-enhanced.html), [non-text contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html), and [focus visible](https://www.w3.org/WAI/WCAG22/Understanding/focus-visible.html).
 
 ## Motion
 

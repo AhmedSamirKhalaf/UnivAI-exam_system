@@ -17,6 +17,8 @@ export const resultWebhookSchema = z.object({
   student_id: z.string().length(24),
   student_sid: z.string().nullable(),
   chapter_id: z.string().length(24).nullable(),
+  attempt_number: z.number().int().min(1),
+  final_form: z.enum(["primary", "retake"]).nullable(),
   mark: z.number().nullable(),
   total_questions: z.number().int().min(0),
   max_score: z.number().int().min(0),

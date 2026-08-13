@@ -11,6 +11,7 @@ export type GradingStatus = "auto_graded" | "pending_review" | "graded";
 export type IntegrityStatus = "clean" | "invalidated";
 export type PolicyAction = "none" | "session_invalidated";
 export type ReviewStatus = "not_required" | "pending" | "cleared" | "upheld";
+export type FinalExamForm = "primary" | "retake";
 
 export interface IExam extends Document {
   _id: mongoose.Types.ObjectId;
@@ -32,6 +33,9 @@ export interface IExam extends Document {
   publication_key?: string;
   published_at?: Date;
   questions_snapshot?: QuestionProvenanceInput[];
+  final_form?: FinalExamForm;
+  access_opens_at?: Date;
+  access_expires_at?: Date;
   submitted_at?: Date;
   submission_idempotency_key?: string;
   integrity_metadata?: Record<string, unknown>;
@@ -97,6 +101,13 @@ const examSchema = new Schema<IExam>(
     publication_key: { type: String, immutable: true },
     published_at: { type: Date, immutable: true },
     questions_snapshot: { type: Schema.Types.Mixed, immutable: true },
+    final_form: {
+      type: String,
+      enum: ["primary", "retake"],
+      immutable: true,
+    },
+    access_opens_at: { type: Date },
+    access_expires_at: { type: Date },
     submitted_at: { type: Date },
     submission_idempotency_key: { type: String },
     integrity_metadata: { type: Schema.Types.Mixed },
@@ -295,6 +306,20 @@ examSchema.index(
 );
 
 examSchema.index({ student_id: 1, type: 1 });
+examSchema.index(
+  { student_id: 1, curriculum_id: 1, type: 1, title: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: "mid" },
+  },
+);
+examSchema.index(
+  { student_id: 1, curriculum_id: 1, final_form: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: "final", final_form: { $exists: true } },
+  },
+);
 examSchema.index({ result_webhook_next_attempt_at: 1 });
 
 export const Exam: Model<IExam> =

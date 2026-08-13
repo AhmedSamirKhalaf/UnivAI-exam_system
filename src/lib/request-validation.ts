@@ -51,8 +51,31 @@ export const startFinalSchema = z
     student_id: objectIdString,
     curriculum_id: objectIdString,
     student_sid: studentSidString.optional(),
+    final_form: z.enum(["primary", "retake"]),
+    authorized_at: z.string().datetime({ offset: true }),
+    access_opens_at: z.string().datetime({ offset: true }),
+    access_expires_at: z.string().datetime({ offset: true }),
+    retake_not_before: z.string().datetime({ offset: true }).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const opensAt = new Date(value.access_opens_at);
+    const expiresAt = new Date(value.access_expires_at);
+    if (expiresAt <= opensAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["access_expires_at"],
+        message: "access_expires_at must be after access_opens_at",
+      });
+    }
+    if (value.final_form === "retake" && !value.retake_not_before) {
+      context.addIssue({
+        code: "custom",
+        path: ["retake_not_before"],
+        message: "Retake starts require retake_not_before",
+      });
+    }
+  });
 
 export const gradeFinalSchema = z
   .object({

@@ -51,14 +51,17 @@ function assertPolicyMatchesProductTable() {
   assert.equal(EXAM_ATTEMPT_POLICY.mid.max_attempts, 3);
   assert.equal(EXAM_ATTEMPT_POLICY.mid.cooldown_seconds, 5 * 60 * 60);
   assert.equal(EXAM_ATTEMPT_POLICY.final.max_attempts, 2);
-  assert.equal(EXAM_ATTEMPT_POLICY.final.cooldown_seconds, 2 * 24 * 60 * 60);
+  assert.equal(EXAM_ATTEMPT_POLICY.final.cooldown_seconds, 7 * 24 * 60 * 60);
 }
 
-test("product table is the exact source of truth (quiz 2/3h, mid 3/5h, final 2/48h)", () => {
+test("product table is the exact source of truth (quiz 2/3h, mid 3/5h, final reserve after 7d)", () => {
   assertPolicyMatchesProductTable();
   assert.equal(attemptPolicyStatement("quiz"), "Quiz: 2 attempts, 3 hours between attempts");
   assert.equal(attemptPolicyStatement("mid"), "Midterm: 3 attempts, 5 hours");
-  assert.equal(attemptPolicyStatement("final"), "Final: 2 attempts, 2 days");
+  assert.equal(
+    attemptPolicyStatement("final"),
+    "Final: primary form plus an approved reserve-form retake after 7 days",
+  );
 });
 
 test("a fresh assessment allows its first attempt", () => {
@@ -115,7 +118,7 @@ test("midterm: attempts 1-3 allowed with 5 hours between each; attempt 4 is reje
   assert.equal(fourth.attempts_remaining, 0);
 });
 
-test("final: attempts 1 and 2 allowed with 48 hours between them; attempt 3 is rejected", () => {
+test("final: the reserve attempt needs seven days; a third attempt is rejected", () => {
   const first = attempt(1, "submitted", at(0));
 
   const before = evaluateAttemptPolicy("final", at(COOLDOWN.final - 1), [first]);
@@ -133,11 +136,11 @@ test("final: attempts 1 and 2 allowed with 48 hours between them; attempt 3 is r
   assert.equal(third.attempts_remaining, 0);
 });
 
-test("one millisecond before and exactly at every cooldown boundary (3h/5h/48h)", () => {
+test("one millisecond before and exactly at every cooldown boundary (3h/5h/7d)", () => {
   const cases: Array<[string, number, number]> = [
     ["quiz", 3 * HOUR, 2],
     ["mid", 5 * HOUR, 3],
-    ["final", 2 * DAY, 2],
+    ["final", 7 * DAY, 2],
   ];
   for (const [type, cooldownMs, maxAttempts] of cases) {
     for (let n = 1; n < maxAttempts; n++) {
@@ -250,6 +253,10 @@ test("request bodies cannot carry attempt numbers, issued times, or next-attempt
   const finalBody = {
     student_id: "64b000000000000000000001",
     curriculum_id: "64b000000000000000000021",
+    final_form: "primary",
+    authorized_at: "2026-08-10T00:00:00.000Z",
+    access_opens_at: "2026-08-10T00:00:00.000Z",
+    access_expires_at: "2026-08-11T00:00:00.000Z",
   };
   assert.equal(startFinalSchema.safeParse(finalBody).success, true);
   assert.equal(startFinalSchema.safeParse({ ...finalBody, attempt_number: 3 }).success, false);

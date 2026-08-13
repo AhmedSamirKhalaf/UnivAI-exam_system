@@ -44,6 +44,8 @@ function queuedExam(attempts: number) {
     title: "Final",
     student_id: studentId,
     student_sid: "S-1",
+    attempt_number: 2,
+    final_form: "retake",
     generated_questions: [{ question_id: "q1", type: "essay" }],
     mark: 80,
     passing_mark: 70,
@@ -139,6 +141,8 @@ describe("durable result webhook retry", () => {
       firstHeaders["Idempotency-Key"],
     );
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      attempt_number: 2,
+      final_form: "retake",
       mark: 80,
       total_questions: 1,
       max_score: 100,

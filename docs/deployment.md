@@ -12,7 +12,8 @@ A multi-stage `Dockerfile` produces the production image:
 docker build -t univai-exam:final .
 docker run --rm -p 3200:3200 \
   -e MONGODB_URI=mongodb://host.docker.internal:27017/univai_exams \
-  -e RESULT_WEBHOOK_URL=https://univai.example/api/exam-results \
+  -e RESULT_WEBHOOK_URL=https://univai.example/api/exams/callback \
+  -e EXAM_CALLBACK_SECRET=replace-with-at-least-32-random-bytes \
   -e UNIVAI_MODE=integrated \
   univai-exam:final
 ```
@@ -53,7 +54,8 @@ Example `.env.local`:
 UNIVAI_MODE=integrated
 MONGODB_URI=mongodb://localhost:27017/univai_exams
 UNIVAI_APP_URL=http://localhost:3100
-RESULT_WEBHOOK_URL=https://univai.example/api/exam-results
+RESULT_WEBHOOK_URL=https://univai.example/api/exams/callback
+EXAM_CALLBACK_SECRET=replace-with-at-least-32-random-bytes
 ```
 
 ## Hardening surface

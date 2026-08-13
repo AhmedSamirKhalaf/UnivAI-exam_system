@@ -42,6 +42,8 @@ async function buildPayload(exam: IExam) {
     student_id: exam.student_id.toString(),
     student_sid: exam.student_sid ?? null,
     chapter_id: exam.chapter_id?.toString() ?? null,
+    attempt_number: exam.attempt_number,
+    final_form: exam.type === "final" ? (exam.final_form ?? "primary") : null,
     mark: exam.mark ?? null,
     total_questions: (exam.generated_questions ?? []).length,
     max_score: resultMaximumScore(exam),

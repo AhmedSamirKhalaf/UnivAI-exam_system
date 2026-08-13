@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import mongoose from "mongoose";
+import { Exam } from "../src/models/Exam";
 import {
   generateQuestions,
+  hasLearnerOwnedMidtermSnapshot,
+  learnerQuestionBankFilter,
   legacyQuestionToPublished,
 } from "../src/lib/business-logic";
 
@@ -116,4 +119,67 @@ test("fallback generation uses four quiz options and six midterm/final options",
     assert.equal((question.options as string[]).length, 6);
     assert.ok((question.options as string[]).includes(question.correct_option as string));
   }
+});
+
+test("fallback bank reads require the complete learner and curriculum binding", () => {
+  const chapterId = new mongoose.Types.ObjectId("64b000000000000000000099");
+  const curriculumId = new mongoose.Types.ObjectId("64c000000000000000000099");
+  const firstStudent = new mongoose.Types.ObjectId("64d000000000000000000001");
+  const secondStudent = new mongoose.Types.ObjectId("64d000000000000000000002");
+
+  const first = learnerQuestionBankFilter(chapterId, {
+    studentId: firstStudent,
+    studentSid: "S-2026-000001",
+    curriculumId,
+  });
+  const second = learnerQuestionBankFilter(chapterId, {
+    studentId: secondStudent,
+    studentSid: "S-2026-000002",
+    curriculumId,
+  });
+
+  assert.equal(first.owner_sid, "S-2026-000001");
+  assert.equal(second.owner_sid, "S-2026-000002");
+  assert.notDeepEqual(first.student_id, second.student_id);
+  assert.deepEqual(first.curriculum_id, {
+    $in: [curriculumId, curriculumId.toString()],
+  });
+  assert.equal("$or" in first, false);
+});
+
+test("only a complete learner-owned immutable midterm package is startable", () => {
+  const packageHash = "a".repeat(64);
+  assert.equal(
+    hasLearnerOwnedMidtermSnapshot({
+      student_sid: "S-2026-000014",
+      package_id: "learner-mid.student.hash",
+      package_version: "learner-midterm-package-v1",
+      package_hash: packageHash,
+      publication_key: "learner-mid:student:curriculum:title",
+      questions_snapshot: Array.from({ length: 12 }, (_, index) => ({ index })),
+    }),
+    true,
+  );
+  assert.equal(
+    hasLearnerOwnedMidtermSnapshot({
+      student_sid: "S-2026-000014",
+      package_id: "learner-mid.student.hash",
+      package_version: "learner-midterm-package-v1",
+      package_hash: packageHash,
+      publication_key: "learner-mid:student:curriculum:title",
+      questions_snapshot: [],
+    }),
+    false,
+  );
+});
+
+test("midterm identity has a unique learner/course/title index", () => {
+  const index = Exam.schema.indexes().find(([keys, options]) =>
+    keys.student_id === 1 &&
+    keys.curriculum_id === 1 &&
+    keys.type === 1 &&
+    keys.title === 1 &&
+    options.unique === true,
+  );
+  assert.ok(index, "concurrent midterm materialization must converge on one exam");
 });

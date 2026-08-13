@@ -68,7 +68,12 @@ table (`univai-exam-attempt-policy-v1`) is:
 |---|---|---|
 | Quiz | 2 | 3 hours |
 | Midterm | 3 | 5 hours |
-| Final | 2 | 2 days (48 hours) |
+| Final | Primary + reserve form | Retake starts 7 days after the learner's app-approved request |
+
+Finals use two immutable, disjoint packages per learner. Relaunching an active
+form rotates its access token and preserves server-stored answers; the previous
+browser credential expires. The integrated start route accepts only a signed
+UnivAI App request carrying the primary or approved retake window.
 
 Every issued attempt appends one immutable record to the
 `examattemptrecords` ledger (`src/models/ExamAttemptRecord.ts`). A unique

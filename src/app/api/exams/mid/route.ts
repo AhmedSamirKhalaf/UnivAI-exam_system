@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
 
     const result = await createMid(
       parsed.data.curriculum_id,
+      parsed.data.student_id,
+      parsed.data.student_sid,
       parsed.data.title,
       parsed.data.chapter_ids,
       parsed.data.passing_mark

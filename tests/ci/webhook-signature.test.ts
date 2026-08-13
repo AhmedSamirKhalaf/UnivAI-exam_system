@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { signResultWebhook } from "../../src/lib/webhook-signature";
+import {
+  signResultWebhook,
+  verifyAppRequestSignature,
+} from "../../src/lib/webhook-signature";
 
 describe("result webhook signing", () => {
   it("signs the exact raw body and fails closed without a secret", () => {
@@ -15,5 +18,15 @@ describe("result webhook signing", () => {
     expect(() => signResultWebhook(raw, "")).toThrow(
       "EXAM_CALLBACK_SECRET is required",
     );
+  });
+
+  it("accepts only an exact raw-body signature for trusted final launches", () => {
+    const secret = "trusted-app-launch-secret";
+    const raw = '{"student_id":"64b000000000000000000001","final_form":"retake"}';
+    const signature = signResultWebhook(raw, secret);
+    expect(verifyAppRequestSignature(raw, signature, secret)).toBe(true);
+    expect(verifyAppRequestSignature(`${raw} `, signature, secret)).toBe(false);
+    expect(verifyAppRequestSignature(raw, null, secret)).toBe(false);
+    expect(verifyAppRequestSignature(raw, signature, "")).toBe(false);
   });
 });

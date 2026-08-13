@@ -191,6 +191,7 @@ test.describe.serial("Sprint 1 exam-facing black-box acceptance", () => {
   test("G6: quiz results never gate final-exam eligibility", async ({
     request,
   }) => {
+    const authorizedAt = new Date();
     const enrollmentResponse = await request.post(`${BASE_URL}/api/enrollments`, {
       data: {
         student_id: seed.gate_student._id,
@@ -206,6 +207,10 @@ test.describe.serial("Sprint 1 exam-facing black-box acceptance", () => {
       data: {
         student_id: seed.gate_student._id,
         curriculum_id: seed.curriculum._id,
+        final_form: "primary",
+        authorized_at: authorizedAt.toISOString(),
+        access_opens_at: new Date(authorizedAt.getTime() - 60_000).toISOString(),
+        access_expires_at: new Date(authorizedAt.getTime() + 24 * 60 * 60_000).toISOString(),
       },
       headers,
     });

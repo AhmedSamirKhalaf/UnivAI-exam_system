@@ -31,6 +31,8 @@ export interface IExamSession extends Document {
   answers: Record<string, unknown>[];
   access_token_hash?: string;
   access_token_issued_at?: Date;
+  /** Incremented whenever a recovery launch invalidates the previous token. */
+  session_generation: number;
   last_action_id?: string;
   last_action_question_id?: string;
   last_action_revision?: number;
@@ -93,6 +95,7 @@ const examSessionSchema = new Schema<IExamSession>(
     answers: { type: Schema.Types.Mixed, required: true, default: [] },
     access_token_hash: { type: String, select: false },
     access_token_issued_at: { type: Date },
+    session_generation: { type: Number, required: true, min: 0, default: 0 },
     last_action_id: { type: String },
     last_action_question_id: { type: String },
     last_action_revision: { type: Number },

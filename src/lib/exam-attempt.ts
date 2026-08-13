@@ -69,6 +69,17 @@ function tokenDigest(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** A recovery launch may replace only a connection from an older token generation. */
+export function isNewerSessionGeneration(incoming: number, existing: number): boolean {
+  return (
+    Number.isSafeInteger(incoming) &&
+    Number.isSafeInteger(existing) &&
+    incoming >= 0 &&
+    existing >= 0 &&
+    incoming > existing
+  );
+}
+
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -95,6 +106,8 @@ export async function issueExamAttemptToken(
         access_token_hash: tokenDigest(token),
         access_token_issued_at: new Date(),
       },
+      $inc: { session_generation: 1 },
+      $unset: { active_connection_id: "" },
     },
   );
   if (result.matchedCount !== 1) {
@@ -122,14 +135,49 @@ export async function requireExamAttempt(
 ): Promise<IExamSession | null> {
   if (isStandalone()) {
     assertStandaloneRequest(request);
-    return ExamSession.findOne({ exam_id: examId });
+    const session = await ExamSession.findOne({ exam_id: examId });
+    await enforceFinalAccessDeadline(examId, session);
+    return session;
   }
 
   const token = bearerToken(request);
   if (!token) throw new ExamAttemptError("Exam access token is required", 401);
   const session = await verifyExamAttemptToken(examId, token);
   if (!session) throw new ExamAttemptError("Exam access token is invalid", 403);
+  await enforceFinalAccessDeadline(examId, session);
   return session;
+}
+
+async function enforceFinalAccessDeadline(
+  examId: string,
+  session: IExamSession | null,
+): Promise<void> {
+  const exam = await Exam.findById(examId).select("type access_expires_at");
+  if (
+    exam?.type !== "final" ||
+    !exam.access_expires_at ||
+    new Date().getTime() < exam.access_expires_at.getTime()
+  ) {
+    return;
+  }
+  if (session?.status === "in_progress") {
+    await ExamSession.updateOne(
+      { _id: session._id, status: "in_progress" },
+      {
+        $set: {
+          status: "terminated",
+          terminated_reason: "timeout",
+          ended_at: exam.access_expires_at,
+          integrity_state: "submitted",
+        },
+        $unset: { access_token_hash: "", active_connection_id: "" },
+      },
+    );
+  }
+  throw new ExamAttemptError(
+    "This final-exam window has ended. You can request a retake from UnivAI during the next 14 days.",
+    410,
+  );
 }
 
 function publicQuestion(value: Record<string, unknown>): PublicQuestion {

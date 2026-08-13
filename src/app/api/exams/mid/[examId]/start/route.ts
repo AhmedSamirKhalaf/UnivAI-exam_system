@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Exam } from "@/models/Exam";
 import {
+  hasLearnerOwnedMidtermSnapshot,
   startMid,
 } from "@/lib/business-logic";
 import {
@@ -35,13 +36,22 @@ export async function POST(
       throw new ExamAttemptError("Authenticated student_id is required", 401);
     }
     const exam = await Exam.findById(examId).select(
-      "student_id published_midterm_id questions_snapshot taken",
+      "student_id student_sid published_midterm_id questions_snapshot taken package_id package_version package_hash publication_key",
     );
     if (!exam) throw new ExamAttemptError("Exam not found", 404);
     if (exam.student_id.toString() !== body.student_id) {
       throw new ExamAttemptError("Exam does not belong to this student", 403);
     }
-    if (!exam.published_midterm_id || !exam.questions_snapshot?.length) {
+    if (
+      hasLearnerOwnedMidtermSnapshot(exam) &&
+      body.student_sid !== exam.student_sid
+    ) {
+      throw new ExamAttemptError("Midterm does not belong to this registration", 403);
+    }
+    if (
+      (!exam.published_midterm_id && !hasLearnerOwnedMidtermSnapshot(exam)) ||
+      !exam.questions_snapshot?.length
+    ) {
       throw new ExamAttemptError("Midterm is not published", 409);
     }
     if (exam.taken) {

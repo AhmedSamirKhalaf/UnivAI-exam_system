@@ -97,6 +97,6 @@ test("pre-opened developer tools trigger a reversible hard gate", async () => {
   assert.match(deterrents, /consecutiveCleanDimensionSignals >= 2/);
   assert.match(deterrents, /onDevToolsChange\(true\)/);
   assert.match(deterrents, /onDevToolsChange\(false\)/);
-  assert.match(runner, /Exam paused — close developer tools/);
+  assert.match(runner, /t\("examPausedDeveloperTools"\)/);
   assert.match(runner, /devToolsPausedRef\.current/);
 });

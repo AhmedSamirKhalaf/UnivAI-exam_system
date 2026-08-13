@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { AppRouterCacheProvider } from "@mui/material-nextjs/v16-appRouter";
 import CssBaseline from "@mui/material/CssBaseline";
 import AppBar from "@mui/material/AppBar";
+import Button from "@mui/material/Button";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import Container from "@mui/material/Container";
@@ -9,42 +9,57 @@ import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
 import SchoolRounded from "@mui/icons-material/SchoolRounded";
 import ExamThemeProvider from "./ExamThemeProvider";
+import { examDirection, translateExam } from "@/i18n/exam-locale";
+import { getRequestExamLocale } from "@/i18n/request-locale";
 
-export const metadata: Metadata = {
-  title: "UnivAI Exams",
-  description: "Quizzes and exams for the UnivAI learning simulator",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getRequestExamLocale();
+  return {
+    title: translateExam(locale, "metadataTitle"),
+    description: translateExam(locale, "metadataDescription"),
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getRequestExamLocale();
+  const direction = examDirection(locale);
+  const t = (key: Parameters<typeof translateExam>[1]) => translateExam(locale, key);
+
   return (
-    <html lang="en">
+    <html lang={locale} dir={direction}>
       <body>
-        <AppRouterCacheProvider>
-          <ExamThemeProvider>
-            <CssBaseline />
-            <AppBar position="sticky" color="inherit">
-              <Toolbar>
-                <Stack direction="row" spacing={1.5}>
-                  <SchoolRounded color="primary" />
-                  <Typography variant="h6">UnivAI Exams</Typography>
-                </Stack>
-              </Toolbar>
-            </AppBar>
-            <Container component="main" maxWidth="lg">
-              <Stack spacing={3}>
-                <Toolbar variant="dense" />
-                {process.env.UNIVAI_MODE === "standalone" &&
-                process.env.NODE_ENV !== "production" ? (
-                  <Alert severity="warning">Standalone development data</Alert>
-                ) : null}
-                {children}
-                <Toolbar />
+        <ExamThemeProvider locale={locale}>
+          <CssBaseline />
+          <Button
+            component="a"
+            href="#main-content"
+            className="exam-skip-link"
+            variant="contained"
+          >
+            {t("skipToMain")}
+          </Button>
+          <AppBar position="sticky" color="inherit">
+            <Toolbar>
+              <Stack direction="row" spacing={1.5}>
+                <SchoolRounded color="primary" />
+                <Typography variant="h6">{t("appName")}</Typography>
               </Stack>
-            </Container>
-          </ExamThemeProvider>
-        </AppRouterCacheProvider>
+            </Toolbar>
+          </AppBar>
+          <Container component="main" id="main-content" tabIndex={-1} maxWidth="lg">
+            <Stack spacing={3}>
+              <Toolbar variant="dense" />
+              {process.env.UNIVAI_MODE === "standalone" &&
+              process.env.NODE_ENV !== "production" ? (
+                <Alert severity="warning">{t("standaloneDevelopmentData")}</Alert>
+              ) : null}
+              {children}
+              <Toolbar />
+            </Stack>
+          </Container>
+        </ExamThemeProvider>
       </body>
     </html>
   );

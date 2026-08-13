@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import mongoose from "mongoose";
 
 /* ────────────────────────────────────────────
@@ -79,11 +79,11 @@ async function seedPublishedQuestionBanks(
   }
 
   await collection.insertMany(
-    Array.from({ length: 10 }, (_, index) => ({
+    Array.from({ length: 20 }, (_, index) => ({
       blueprint_id: new mongoose.Types.ObjectId(blueprintId),
       curriculum_id: new mongoose.Types.ObjectId(curriculumId),
       learner_id: learnerId,
-      package_id: "ci-final-package-v1",
+      package_id: index < 10 ? "ci-final-primary-v1" : "ci-final-reserve-v1",
       schema_version: "question-provenance-v1",
       question_id: `ci-final-${index + 1}`,
       prompt: `Grounded cumulative final question ${index + 1}`,
@@ -647,10 +647,31 @@ async function main() {
   let finalExamLaunch = null;
 
   if (curriculumId) {
-    const r12 = await test("12. Start final exam", "POST", "/api/exams/final/start", {
+    const authorizedAt = new Date();
+    const finalStartBody = {
       student_id: aliceId,
       curriculum_id: curriculumId,
-    });
+      final_form: "primary",
+      authorized_at: authorizedAt.toISOString(),
+      access_opens_at: new Date(authorizedAt.getTime() - 60_000).toISOString(),
+      access_expires_at: new Date(authorizedAt.getTime() + 24 * 60 * 60_000).toISOString(),
+    };
+    const finalStartRaw = JSON.stringify(finalStartBody);
+    const finalStartHeaders = process.env.UNIVAI_MODE === "standalone"
+      ? {}
+      : {
+          "X-UnivAI-App-Signature": createHmac(
+            "sha256",
+            process.env.EXAM_CALLBACK_SECRET || "",
+          ).update(finalStartRaw).digest("hex"),
+        };
+    const r12 = await test(
+      "12. Start final exam",
+      "POST",
+      "/api/exams/final/start",
+      finalStartBody,
+      finalStartHeaders,
+    );
     if (r12.ok) {
       finalExamId = r12.body?._id;
       finalExamToken = r12.body?.attempt_token;

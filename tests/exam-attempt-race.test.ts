@@ -5,6 +5,7 @@ import { Exam } from "../src/models/Exam";
 import { ExamSession } from "../src/models/ExamSession";
 import { ExamAttemptRecord } from "../src/models/ExamAttemptRecord";
 import { Chapter } from "../src/models/Chapter";
+import { QuestionProvenance } from "../src/models/QuestionProvenance";
 import {
   issueAttemptRecord,
   getAttemptHistory,
@@ -36,6 +37,7 @@ async function dbBlocker(): Promise<string | null> {
     await ExamAttemptRecord.createIndexes();
     await Exam.init();
     await ExamSession.init();
+    await QuestionProvenance.init();
     return null;
   } catch (error) {
     await mongoose.disconnect().catch(() => undefined);
@@ -51,17 +53,44 @@ async function cleanCollections(): Promise<void> {
     db.collection("exams").deleteMany({}),
     db.collection("examsessions").deleteMany({}),
     db.collection("chapters").deleteMany({}),
+    db.collection("questionprovenances").deleteMany({}),
     db.collection("audit_logs").deleteMany({}),
   ]);
 }
 
-async function seedChapter(id: string): Promise<void> {
+async function seedChapter(id: string, learnerId?: string): Promise<void> {
+  const chapterId = new mongoose.Types.ObjectId(id);
   await Chapter.create({
-    _id: new mongoose.Types.ObjectId(id),
+    _id: chapterId,
     curriculum_id: new mongoose.Types.ObjectId("64b000000000000000000021"),
     title: `Chapter ${id}`,
     number: 1,
   });
+
+  if (!learnerId) return;
+
+  await QuestionProvenance.insertMany(
+    Array.from({ length: 5 }, (_, index) => ({
+      blueprint_id: chapterId,
+      schema_version: "question-provenance-v1",
+      question_id: `attempt-policy-${id}-${index + 1}`,
+      prompt: `Attempt policy fixture question ${index + 1}?`,
+      type: "mcq",
+      options: ["Option A", "Option B", "Option C", "Option D"],
+      correct_option: "Option A",
+      plan_version: "attempt-policy-fixture-v1",
+      package_id: `attempt-policy-${id}`,
+      chapter_id: chapterId,
+      learner_id: learnerId,
+      approved: true,
+      provenance: {
+        document_id: `attempt-policy-source-${id}`,
+        document_title: `Attempt policy source ${id}`,
+        page_number: index + 1,
+        section: "Published quiz fixture",
+      },
+    })),
+  );
 }
 
 /**
@@ -85,7 +114,7 @@ after(async () => {
 
 test("concurrent start requests issue exactly one attempt and one deterministic outcome", async (t) => {
   if (blocker) return t.skip(blocker);
-  await seedChapter("64b000000000000000000011");
+  await seedChapter("64b000000000000000000011", studentFor("01"));
   const results = await Promise.allSettled([
     startQuiz(studentFor("01"), "64b000000000000000000011", undefined, undefined, T0),
     startQuiz(studentFor("01"), "64b000000000000000000011", undefined, undefined, T0),
@@ -145,7 +174,7 @@ test("concurrent ledger inserts create exactly one record", async (t) => {
 
 test("resume of an active attempt issues no new attempt", async (t) => {
   if (blocker) return t.skip(blocker);
-  await seedChapter("64b000000000000000000013");
+  await seedChapter("64b000000000000000000013", studentFor("03"));
   const first = await startQuiz(studentFor("03"), "64b000000000000000000013", undefined, undefined, T0);
   assert.equal(first.created, true);
 
@@ -160,7 +189,7 @@ test("resume of an active attempt issues no new attempt", async (t) => {
 
 test("three-hour cooldown enforced by the injected server clock", async (t) => {
   if (blocker) return t.skip(blocker);
-  await seedChapter("64b000000000000000000014");
+  await seedChapter("64b000000000000000000014", studentFor("04"));
   await startQuiz(studentFor("04"), "64b000000000000000000014", undefined, undefined, T0);
 
   // Simulate the server terminalizing the session (browser close + timeout).
@@ -196,7 +225,7 @@ test("three-hour cooldown enforced by the injected server clock", async (t) => {
 
 test("exhaustion rejects a third quiz attempt", async (t) => {
   if (blocker) return t.skip(blocker);
-  await seedChapter("64b000000000000000000015");
+  await seedChapter("64b000000000000000000015", studentFor("05"));
   await startQuiz(studentFor("05"), "64b000000000000000000015", undefined, undefined, T0);
   await ExamSession.updateOne(
     { student_id: studentFor("05") },
@@ -234,7 +263,7 @@ test("exhaustion rejects a third quiz attempt", async (t) => {
 
 test("browser close never refunds an attempt", async (t) => {
   if (blocker) return t.skip(blocker);
-  await seedChapter("64b000000000000000000016");
+  await seedChapter("64b000000000000000000016", studentFor("06"));
   const student = studentFor("06");
   const first = await startQuiz(student, "64b000000000000000000016", undefined, undefined, T0);
   assert.equal(first.created, true);

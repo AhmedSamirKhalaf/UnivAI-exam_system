@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 import { Enrollment } from "@/models/Enrollment";
 import { Exam, IExam } from "@/models/Exam";
@@ -13,6 +14,7 @@ import { ExamAttemptError } from "@/lib/exam-attempt";
 import { ExamChapter } from "@/models/ExamChapter";
 import { Chapter } from "@/models/Chapter";
 import { Curriculum } from "@/models/Curriculum";
+import { Student } from "@/models/Student";
 import { Book } from "@/models/Book";
 import { QuestionProvenance } from "@/models/QuestionProvenance";
 import { ProctoringEvent, ProctoringEventType } from "@/models/ProctoringEvent";
@@ -248,14 +250,14 @@ export function legacyQuestionToPublished(
 async function legacyBankAsPublished(
   chapterId: mongoose.Types.ObjectId,
   chapterTitle: string,
-  learnerId: string,
+  owner: LearnerBankOwner,
   expectedOptionCount = 4,
 ): Promise<Record<string, unknown>[]> {
   const db = mongoose.connection.db;
   if (!db) return [];
-  const bank = await db.collection("question_banks").findOne({
-    chapter_id: { $in: [chapterId, chapterId.toString()] },
-  });
+  const bank = await db.collection("question_banks").findOne(
+    learnerQuestionBankFilter(chapterId, owner),
+  );
   const questions = (bank?.questions ?? []) as BankQuestion[];
   return questions.flatMap((question, index) => {
     const published = legacyQuestionToPublished(
@@ -263,7 +265,7 @@ async function legacyBankAsPublished(
       index,
       chapterId,
       chapterTitle,
-      learnerId,
+      owner.studentSid ?? owner.studentId.toString(),
       expectedOptionCount,
     );
     return published ? [published] : [];
@@ -272,20 +274,27 @@ async function legacyBankAsPublished(
 
 async function legacyFinalBankAsPublished(
   curriculumId: mongoose.Types.ObjectId,
-  learnerId: string,
+  owner: LearnerBankOwner,
 ): Promise<Record<string, unknown>[]> {
   const chapters = await Chapter.find({ curriculum_id: curriculumId })
     .select("_id title")
+    .sort({ number: 1, _id: 1 })
     .lean();
   const banks = await Promise.all(
     chapters.map((chapter) =>
-      legacyBankAsPublished(chapter._id, chapter.title, learnerId, 6),
+      legacyBankAsPublished(chapter._id, chapter.title, owner, 6),
     ),
   );
   return banks
     .flat()
-    .map((question) => ({ ...question, blueprint_id: curriculumId }))
-    .slice(0, FINAL_MIN_QUESTIONS);
+    .map((question) => ({
+      ...question,
+      blueprint_id: curriculumId,
+      // Old weekly generators often reused q_1, q_2, ... in every chapter.
+      // Namespace the cumulative-paper ids so the two immutable forms cannot
+      // collide or accidentally present the same item as a different item.
+      question_id: `final-${String(question.blueprint_id)}-${String(question.question_id)}`,
+    }));
 }
 
 /**
@@ -295,13 +304,15 @@ async function legacyFinalBankAsPublished(
  * generator survives only as a last resort for chapters with no bank.
  */
 async function bankQuestions(
-  chapterId: mongoose.Types.ObjectId
+  chapterId: mongoose.Types.ObjectId,
+  owner?: LearnerBankOwner,
 ): Promise<BankQuestion[]> {
+  if (!owner) return [];
   const db = mongoose.connection.db;
   if (!db) return [];
   const bank = await db
     .collection("question_banks")
-    .findOne({ chapter_id: chapterId.toString() });
+    .findOne(learnerQuestionBankFilter(chapterId, owner));
   const questions = (bank?.questions ?? []) as BankQuestion[];
   return questions.filter((q) => q.prompt && q.type);
 }
@@ -342,7 +353,8 @@ function placeholderQuestions(count: number, examType: "quiz" | "mid" | "final")
 export async function generateQuestions(
   scope: mongoose.Types.ObjectId | mongoose.Types.ObjectId[],
   count: number,
-  examType: "quiz" | "mid" | "final"
+  examType: "quiz" | "mid" | "final",
+  owner?: LearnerBankOwner,
 ): Promise<Record<string, unknown>[]> {
   const chapterIds = Array.isArray(scope) ? scope : [scope];
   const random = isStandalone()
@@ -352,7 +364,7 @@ export async function generateQuestions(
   const pool: BankQuestion[] = [];
   if (examType !== "final") {
     for (const chapterId of chapterIds) {
-      pool.push(...(await bankQuestions(chapterId)));
+      pool.push(...(await bankQuestions(chapterId, owner)));
     }
   }
 
@@ -452,9 +464,11 @@ async function publishedBank(
   learnerId: mongoose.Types.ObjectId,
   studentSid?: string,
 ): Promise<Record<string, unknown>[]> {
-  const learnerFilter = studentSid
-    ? { $or: [{ learner_id: studentSid }, { learner_id: learnerId.toString() }] }
-    : { learner_id: learnerId.toString() };
+  // A supplied registration number is authoritative; never OR it with a
+  // different identity because that turns a mismatched request into access.
+  const learnerFilter = {
+    learner_id: studentSid ?? learnerId.toString(),
+  };
   return await QuestionProvenance.find({
     ...filter,
     approved: true,
@@ -528,7 +542,11 @@ export async function startQuiz(
       published = await legacyBankAsPublished(
         chapterIdObj,
         chapter.title,
-        studentSid ?? studentIdObj.toString(),
+        {
+          studentId: studentIdObj,
+          studentSid,
+          curriculumId: chapter.curriculum_id,
+        },
       );
     }
     if (!existing?.questions_snapshot?.length && published.length < questionCount) {
@@ -715,6 +733,9 @@ export async function startMid(
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
   if (exam.type !== "mid") throw new Error("Exam is not a mid");
+  if (exam.student_sid && studentSid !== exam.student_sid) {
+    throw new ExamAttemptError("Midterm does not belong to this registration", 403);
+  }
   if (studentSid) exam.student_sid = studentSid;
 
   const examChapters = await ExamChapter.find({ exam_id: examIdObj });
@@ -729,8 +750,11 @@ export async function startMid(
     }
   }
 
-  if (!exam.questions_snapshot?.length) {
-    throw new Error("Midterm has no immutable published question package");
+  if (
+    !exam.questions_snapshot?.length ||
+    (!exam.published_midterm_id && !hasLearnerOwnedMidtermSnapshot(exam))
+  ) {
+    throw new Error("Midterm has no immutable learner-owned question package");
   }
   const count = exam.questions_snapshot.length;
   if (requestedCount !== undefined && requestedCount !== count) {
@@ -801,16 +825,103 @@ export async function startMid(
 /*   createMid — admin batch-create                                    */
 /* ------------------------------------------------------------------ */
 
+const LEARNER_MIDTERM_PACKAGE_VERSION = "learner-midterm-package-v1";
+const LEARNER_MIDTERM_QUESTION_COUNT = 12;
+
+export function hasLearnerOwnedMidtermSnapshot(exam: {
+  student_sid?: string;
+  package_id?: string;
+  package_version?: string;
+  package_hash?: string;
+  publication_key?: string;
+  questions_snapshot?: unknown[];
+}): boolean {
+  return Boolean(
+    exam.student_sid &&
+    exam.package_id?.startsWith("learner-mid.") &&
+    exam.package_version === LEARNER_MIDTERM_PACKAGE_VERSION &&
+    /^[a-f0-9]{64}$/.test(exam.package_hash ?? "") &&
+    exam.publication_key?.startsWith("learner-mid:") &&
+    Array.isArray(exam.questions_snapshot) &&
+    exam.questions_snapshot.length >= 5
+  );
+}
+
+async function assembleLearnerMidtermPaper(input: {
+  curriculumId: mongoose.Types.ObjectId;
+  studentId: mongoose.Types.ObjectId;
+  studentSid: string;
+  chapters: Array<{ _id: mongoose.Types.ObjectId; title: string; number: number }>;
+}): Promise<Record<string, unknown>[]> {
+  const owner: LearnerBankOwner = {
+    studentId: input.studentId,
+    studentSid: input.studentSid,
+    curriculumId: input.curriculumId,
+  };
+  const pools = await Promise.all(
+    input.chapters.map(async (chapter) => ({
+      chapter,
+      questions: await legacyBankAsPublished(
+        chapter._id,
+        chapter.title,
+        owner,
+        6,
+      ),
+    })),
+  );
+  if (pools.some((pool) => pool.questions.length === 0)) {
+    throw new Error("Every completed week needs a learner-owned midterm bank");
+  }
+
+  const selected: Record<string, unknown>[] = [];
+  let cursor = 0;
+  while (selected.length < LEARNER_MIDTERM_QUESTION_COUNT) {
+    let added = false;
+    for (const pool of pools) {
+      const question = pool.questions[cursor];
+      if (!question) continue;
+      selected.push({
+        ...question,
+        question_id: `mid-${pool.chapter._id}-${String(question.question_id)}`,
+      });
+      added = true;
+      if (selected.length === LEARNER_MIDTERM_QUESTION_COUNT) break;
+    }
+    if (!added) break;
+    cursor += 1;
+  }
+  if (selected.length < LEARNER_MIDTERM_QUESTION_COUNT) {
+    throw new Error(
+      `Insufficient learner-owned midterm bank: ${selected.length} available, ${LEARNER_MIDTERM_QUESTION_COUNT} required`,
+    );
+  }
+  return selected.map(publishedQuestionToSnapshot);
+}
+
 export async function createMid(
   curriculumId: string | mongoose.Types.ObjectId,
+  studentId: string | mongoose.Types.ObjectId,
+  studentSid: string,
   title: string,
   chapterIds: (string | mongoose.Types.ObjectId)[],
   passingMark: number
 ): Promise<{ examsCreated: number }> {
+  const curriculumIdObj = new mongoose.Types.ObjectId(curriculumId.toString());
+  const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
+  const [student, curriculum] = await Promise.all([
+    Student.findOne({ _id: studentIdObj, sid: studentSid }).select("_id").lean(),
+    Curriculum.findOne({
+      _id: curriculumIdObj,
+      owner_student_id: studentIdObj,
+    }).select("_id").lean(),
+  ]);
+  if (!student || !curriculum) {
+    throw new Error("Midterm learner, registration, and curriculum ownership do not match");
+  }
   const chapters = await Chapter.find({
     _id: { $in: chapterIds },
-    curriculum_id: curriculumId,
-  });
+    curriculum_id: curriculumIdObj,
+  }).sort({ number: 1, _id: 1 });
 
   if (chapters.length !== chapterIds.length) {
     const foundIds = chapters.map((c) => c._id.toString());
@@ -822,45 +933,141 @@ export async function createMid(
     );
   }
 
-  const enrollments = await Enrollment.find({
-    curriculum_id: curriculumId,
+  const enrollment = await Enrollment.findOne({
+    curriculum_id: curriculumIdObj,
+    student_id: studentIdObj,
     status: "active",
   });
-
-  if (enrollments.length === 0) {
+  if (!enrollment) {
     return { examsCreated: 0 };
   }
 
-  const examDocs = enrollments.map((e) => ({
-    type: "mid" as const,
+  const bindChapters = async (examId: mongoose.Types.ObjectId): Promise<void> => {
+    await Promise.all(
+      chapterIds.map((chapterId) =>
+        ExamChapter.updateOne(
+          {
+            chapter_id: new mongoose.Types.ObjectId(chapterId.toString()),
+            exam_id: examId,
+          },
+          { $setOnInsert: { createdAt: new Date(), updatedAt: new Date() } },
+          { upsert: true },
+        ),
+      ),
+    );
+  };
+
+  let exam = await Exam.findOne({
+    type: "mid",
+    student_id: studentIdObj,
+    curriculum_id: curriculumIdObj,
     title,
-    student_id: e.student_id,
-    attempt_number: 1,
-    taken: false,
-    passed: false,
-    passing_mark: passingMark,
-    grading_status: "auto_graded" as const,
-    integrity_status: "clean" as const,
-    policy_action: "none" as const,
-    review_status: "not_required" as const,
-  }));
+  });
+  if (
+    exam &&
+    (exam.published_midterm_id || hasLearnerOwnedMidtermSnapshot(exam))
+  ) {
+    await bindChapters(exam._id);
+    return { examsCreated: 0 };
+  }
 
-  const createdExams = await Exam.insertMany(examDocs);
+  const questions = await assembleLearnerMidtermPaper({
+    curriculumId: curriculumIdObj,
+    studentId: studentIdObj,
+    studentSid,
+    chapters: chapters.map((chapter) => ({
+      _id: chapter._id,
+      title: chapter.title,
+      number: chapter.number,
+    })),
+  });
+  if (passingMark < 0 || passingMark > questions.length) {
+    throw new Error("Midterm passing mark exceeds its learner-owned paper");
+  }
+  const packageHash = createHash("sha256")
+    .update(JSON.stringify(questions))
+    .digest("hex");
+  const packageId = `learner-mid.${studentIdObj}.${packageHash.slice(0, 16)}`;
+  const publicationKey = `learner-mid:${studentIdObj}:${curriculumIdObj}:${title}`;
+  const publishedAt = new Date();
 
-  const examChapterDocs = createdExams.flatMap((exam) =>
-    chapterIds.map((chapterId) => ({
-      chapter_id: new mongoose.Types.ObjectId(chapterId.toString()),
-      exam_id: exam._id,
-    }))
-  );
+  let created = false;
+  if (!exam) {
+    try {
+      exam = await Exam.create({
+        type: "mid",
+        title,
+        student_id: studentIdObj,
+        student_sid: studentSid,
+        curriculum_id: curriculumIdObj,
+        package_id: packageId,
+        package_version: LEARNER_MIDTERM_PACKAGE_VERSION,
+        package_hash: packageHash,
+        publication_key: publicationKey,
+        published_at: publishedAt,
+        questions_snapshot: questions,
+        generated_questions: questions,
+        attempt_number: 1,
+        taken: false,
+        passed: false,
+        passing_mark: passingMark,
+        grading_status: "auto_graded",
+        integrity_status: "clean",
+        policy_action: "none",
+        review_status: "not_required",
+      });
+      created = true;
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) throw error;
+      exam = await Exam.findOne({
+        type: "mid",
+        student_id: studentIdObj,
+        curriculum_id: curriculumIdObj,
+        title,
+      });
+      if (!exam) throw error;
+    }
+  }
+  if (!exam) throw new Error("Could not create the learner-owned midterm");
+  if (
+    !exam.published_midterm_id &&
+    !hasLearnerOwnedMidtermSnapshot(exam)
+  ) {
+    if (exam.taken) throw new Error("Cannot replace a finalized midterm package");
+    await Exam.collection.updateOne(
+      {
+        _id: exam._id,
+        published_midterm_id: { $exists: false },
+        taken: false,
+      },
+      {
+        $set: {
+          student_sid: studentSid,
+          curriculum_id: curriculumIdObj,
+          package_id: packageId,
+          package_version: LEARNER_MIDTERM_PACKAGE_VERSION,
+          package_hash: packageHash,
+          publication_key: publicationKey,
+          published_at: publishedAt,
+          questions_snapshot: questions,
+          generated_questions: questions,
+          passing_mark: passingMark,
+        },
+      },
+    );
+    exam = await Exam.findById(exam._id);
+    if (!exam?.questions_snapshot?.length) {
+      throw new Error("Could not materialize the learner-owned midterm package");
+    }
+  }
 
-  await ExamChapter.insertMany(examChapterDocs);
+  await bindChapters(exam._id);
 
-  return { examsCreated: createdExams.length };
+  return { examsCreated: created ? 1 : 0 };
 }
 
 /* ------------------------------------------------------------------ */
-/*   startFinal — policy-gated final (2 attempts, 2 days)              */
+/*   Legacy generic final start (the signed integrated route does not use it) */
 /* ------------------------------------------------------------------ */
 
 export async function startFinal(
@@ -907,7 +1114,7 @@ export async function startFinal(
     if (!existingFinal?.questions_snapshot?.length && published.length === 0) {
       published = await legacyFinalBankAsPublished(
         curriculumIdObj,
-        studentSid ?? studentIdObj.toString(),
+        { studentId: studentIdObj, studentSid, curriculumId: curriculumIdObj },
       );
     }
     if (!existingFinal?.questions_snapshot?.length && published.length < FINAL_MIN_QUESTIONS) {
@@ -1008,6 +1215,349 @@ export async function startFinal(
 /*   Proctoring — discrete events (dedup by window)                   */
 /* ------------------------------------------------------------------ */
 
+/* Final form preparation and trusted-window launch. */
+export type FinalStartPolicy = {
+  form: "primary" | "retake";
+  accessOpensAt: Date;
+  accessExpiresAt: Date;
+  retakeNotBefore?: Date;
+};
+
+export type LearnerBankOwner = {
+  studentId: mongoose.Types.ObjectId;
+  curriculumId: mongoose.Types.ObjectId;
+  studentSid?: string;
+};
+
+/** Exact owner filter for App-synced fallback banks; no unowned legacy reads. */
+export function learnerQuestionBankFilter(
+  chapterId: mongoose.Types.ObjectId,
+  owner: LearnerBankOwner,
+): Record<string, unknown> {
+  return {
+    schema_version: "learner-question-bank-binding-v1",
+    chapter_id: { $in: [chapterId, chapterId.toString()] },
+    owner_sid: owner.studentSid ?? "__missing_learner_sid__",
+    student_id: { $in: [owner.studentId, owner.studentId.toString()] },
+    curriculum_id: {
+      $in: [owner.curriculumId, owner.curriculumId.toString()],
+    },
+  };
+}
+
+type PreparedFinalForm = {
+  form: "primary" | "retake";
+  packageId: string;
+  questions: Record<string, unknown>[];
+  blueprintId: mongoose.Types.ObjectId;
+  planVersion: string;
+};
+
+function finalPassingMark(questions: Record<string, unknown>[]): number {
+  return questions.every((question) => question.type === "mcq")
+    ? Math.max(1, Math.ceil(questions.length * 0.6))
+    : 50;
+}
+
+function finalQuestionContentSignature(question: Record<string, unknown>): string {
+  return JSON.stringify({
+    prompt: question.prompt,
+    type: question.type,
+    options: question.options ?? null,
+    correct_option: question.correct_option ?? null,
+  });
+}
+
+function assertDisjointFinalPapers(
+  primary: Record<string, unknown>[],
+  retake: Record<string, unknown>[],
+): void {
+  const primaryContent = new Set(primary.map(finalQuestionContentSignature));
+  if (retake.some((question) => primaryContent.has(finalQuestionContentSignature(question)))) {
+    throw new Error("Primary and reserve final packages must not reuse question content");
+  }
+}
+
+export function preparePublishedFinalForms(
+  published: Record<string, unknown>[],
+): PreparedFinalForm[] {
+  if (published.length === 0) return [];
+  const packages = new Map<string, Record<string, unknown>[]>();
+  for (const question of published) {
+    const packageId = String(question.package_id ?? "").trim();
+    if (!packageId) {
+      throw new Error(
+        "Published final questions must identify their package; publish two complete final packages for this learner",
+      );
+    }
+    const group = packages.get(packageId) ?? [];
+    group.push(question);
+    packages.set(packageId, group);
+  }
+  const eligible = [...packages.entries()]
+    .filter(([, questions]) => questions.length >= FINAL_MIN_QUESTIONS)
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (eligible.length < 2) {
+    throw new Error(
+      `Two distinct published final packages are required; ${eligible.length} complete package(s) are available`,
+    );
+  }
+  const forms = eligible.slice(0, 2).map<PreparedFinalForm>(([packageId, questions], index) => {
+    const publication = assertOnePublishedVersion(questions);
+    return {
+      form: index === 0 ? "primary" : "retake",
+      packageId,
+      questions: questions.map(publishedQuestionToSnapshot),
+      blueprintId: publication.blueprintId,
+      planVersion: publication.planVersion,
+    };
+  });
+  if (forms[0]!.questions.length !== forms[1]!.questions.length) {
+    throw new Error("Primary and reserve final packages must contain the same number of questions");
+  }
+  assertDisjointFinalPapers(forms[0]!.questions, forms[1]!.questions);
+  return forms;
+}
+
+export function prepareLegacyFinalForms(
+  published: Record<string, unknown>[],
+  curriculumId: mongoose.Types.ObjectId,
+): PreparedFinalForm[] {
+  const primary = published.filter((_, index) => index % 2 === 0).slice(0, FINAL_MIN_QUESTIONS);
+  const retake = published.filter((_, index) => index % 2 === 1).slice(0, FINAL_MIN_QUESTIONS);
+  if (primary.length < FINAL_MIN_QUESTIONS || retake.length < FINAL_MIN_QUESTIONS) {
+    throw new Error(
+      `Insufficient legacy final bank for two disjoint forms: ${published.length} valid questions available, at least ${FINAL_MIN_QUESTIONS * 2} required`,
+    );
+  }
+  const forms = [
+    { form: "primary" as const, raw: primary },
+    { form: "retake" as const, raw: retake },
+  ].map<PreparedFinalForm>(({ form, raw }) => ({
+    form,
+    packageId: `legacy-${form}-${curriculumId.toString()}`,
+    questions: raw.map(publishedQuestionToSnapshot),
+    blueprintId: curriculumId,
+    planVersion: LEGACY_BANK_PLAN_VERSION,
+  }));
+  assertDisjointFinalPapers(forms[0]!.questions, forms[1]!.questions);
+  return forms;
+}
+
+/**
+ * Materialize both papers before the first launch. The unique form index makes
+ * concurrent starts converge on the same two immutable snapshots.
+ */
+async function ensureFinalForms(input: {
+  studentId: mongoose.Types.ObjectId;
+  curriculumId: mongoose.Types.ObjectId;
+  studentSid?: string;
+  curriculumTitle: string;
+}): Promise<Record<"primary" | "retake", IExam>> {
+  let stored = await Exam.find({
+    student_id: input.studentId,
+    curriculum_id: input.curriculumId,
+    type: "final",
+    final_form: { $in: ["primary", "retake"] },
+  });
+  const present = new Set(stored.map((exam) => exam.final_form));
+  if (!present.has("primary") || !present.has("retake")) {
+    const published = await publishedBank(
+      { curriculum_id: input.curriculumId },
+      input.studentId,
+      input.studentSid,
+    );
+    const prepared = published.length
+      ? preparePublishedFinalForms(published)
+      : prepareLegacyFinalForms(
+          await legacyFinalBankAsPublished(
+            input.curriculumId,
+            {
+              studentId: input.studentId,
+              studentSid: input.studentSid,
+              curriculumId: input.curriculumId,
+            },
+          ),
+          input.curriculumId,
+        );
+
+    const blueprints = new Set(prepared.map((form) => form.blueprintId.toString()));
+    const plans = new Set(prepared.map((form) => form.planVersion));
+    if (blueprints.size !== 1 || plans.size !== 1) {
+      throw new Error("Primary and reserve final packages must use the same blueprint and plan version");
+    }
+
+    for (const form of prepared) {
+      if (present.has(form.form)) continue;
+      try {
+        await Exam.create({
+          type: "final",
+          title:
+            form.form === "primary"
+              ? `Final: ${input.curriculumTitle}`
+              : `Final retake: ${input.curriculumTitle}`,
+          student_id: input.studentId,
+          student_sid: input.studentSid,
+          curriculum_id: input.curriculumId,
+          blueprint_id: form.blueprintId,
+          plan_version: form.planVersion,
+          package_id: form.packageId,
+          final_form: form.form,
+          questions_snapshot: form.questions,
+          attempt_number: form.form === "primary" ? 1 : 2,
+          generated_questions: form.questions,
+          student_answers: [],
+          taken: false,
+          passing_mark: finalPassingMark(form.questions),
+          passed: false,
+          grading_status: "auto_graded",
+          integrity_status: "clean",
+          policy_action: "none",
+          review_status: "not_required",
+        });
+      } catch (error: unknown) {
+        if (!isDuplicateKeyError(error)) throw error;
+      }
+    }
+    stored = await Exam.find({
+      student_id: input.studentId,
+      curriculum_id: input.curriculumId,
+      type: "final",
+      final_form: { $in: ["primary", "retake"] },
+    });
+  }
+
+  const primary = stored.find((exam) => exam.final_form === "primary");
+  const retake = stored.find((exam) => exam.final_form === "retake");
+  if (!primary || !retake) throw new Error("Could not prepare both final-exam forms");
+  if (
+    !primary.blueprint_id ||
+    !retake.blueprint_id ||
+    primary.blueprint_id.toString() !== retake.blueprint_id.toString() ||
+    !primary.plan_version ||
+    primary.plan_version !== retake.plan_version
+  ) {
+    throw new Error("Stored primary and reserve forms do not share one blueprint and plan version");
+  }
+  if (!primary.package_id || !retake.package_id || primary.package_id === retake.package_id) {
+    throw new Error("Stored primary and reserve forms must use distinct packages");
+  }
+  const primaryQuestions = primary.questions_snapshot as Record<string, unknown>[];
+  const retakeQuestions = retake.questions_snapshot as Record<string, unknown>[];
+  if (
+    !Array.isArray(primaryQuestions) ||
+    !Array.isArray(retakeQuestions) ||
+    primaryQuestions.length < FINAL_MIN_QUESTIONS ||
+    primaryQuestions.length !== retakeQuestions.length
+  ) {
+    throw new Error("Stored primary and reserve forms are not distinct comparable papers");
+  }
+  assertDisjointFinalPapers(primaryQuestions, retakeQuestions);
+  return { primary, retake };
+}
+
+/**
+ * Trusted app-controlled final start. Unlike the legacy generic start above,
+ * this path accepts only an authorized primary or reserve window and never
+ * reuses one form's immutable question snapshot for the other.
+ */
+export async function startFinalWithForms(
+  studentId: string | mongoose.Types.ObjectId,
+  curriculumId: string | mongoose.Types.ObjectId,
+  studentSid: string | undefined,
+  policy: FinalStartPolicy,
+  now: Date = new Date(),
+): Promise<IExam> {
+  const studentIdObj = new mongoose.Types.ObjectId(studentId.toString());
+  const curriculumIdObj = new mongoose.Types.ObjectId(curriculumId.toString());
+  if (
+    policy.accessExpiresAt <= policy.accessOpensAt ||
+    now < policy.accessOpensAt ||
+    now >= policy.accessExpiresAt
+  ) {
+    throw new ExamAttemptError("This final-exam form is outside its authorized window", 403);
+  }
+  if (
+    policy.form === "retake" &&
+    (!policy.retakeNotBefore || now < policy.retakeNotBefore)
+  ) {
+    throw new ExamAttemptError("The reserve-form retake is not available yet", 403);
+  }
+
+  const curriculum = await Curriculum.findById(curriculumIdObj);
+  if (!curriculum) throw new Error("Curriculum not found");
+  const forms = await ensureFinalForms({
+    studentId: studentIdObj,
+    curriculumId: curriculumIdObj,
+    studentSid,
+    curriculumTitle: curriculum.title,
+  });
+
+  for (let loop = 0; loop < MAX_START_ATTEMPTS; loop++) {
+    const exam = forms[policy.form];
+    const eligibility = await evaluateStart(
+      studentIdObj,
+      "final",
+      curriculumIdObj,
+      exam,
+      now,
+    );
+    if (eligibility.kind === "blocked") {
+      throw policyErrorForSnapshot(eligibility.snapshot, now);
+    }
+    if (eligibility.kind === "resume") return eligibility.exam;
+
+    const questions = exam.questions_snapshot as Record<string, unknown>[];
+    const issuance = await issueAttemptRecord({
+      learnerId: studentIdObj,
+      type: "final",
+      assessmentId: curriculumIdObj,
+      sourceExamId: exam._id,
+      now,
+      basedOnAttemptNumber: eligibility.basedOnAttemptNumber,
+    });
+    if (!issuance.created) {
+      await sleep(START_RACE_BACKOFF_MS);
+      continue;
+    }
+
+    exam.access_opens_at = policy.accessOpensAt;
+    exam.access_expires_at = policy.accessExpiresAt;
+    await resetExamForAttempt(
+      exam,
+      questions,
+      finalPassingMark(questions),
+      issuance.record.attempt_number,
+      studentSid,
+    );
+    await resetExamSession(exam, studentIdObj, now);
+
+    await writeAudit({
+      actor: { type: "student", id: studentIdObj.toString() },
+      action: "attempt.start",
+      resource: { type: "exam", id: exam._id.toString() },
+      metadata: {
+        exam_type: "final",
+        final_form: policy.form,
+        curriculum_id: curriculumIdObj.toString(),
+        attempt_number: issuance.record.attempt_number,
+        question_count: questions.length,
+        blueprint_id: exam.blueprint_id?.toString(),
+        plan_version: exam.plan_version,
+        package_id: exam.package_id,
+        access_expires_at: policy.accessExpiresAt.toISOString(),
+      },
+    });
+    return exam;
+  }
+
+  throw new ExamAttemptError(
+    "Could not start the final; a concurrent start is in progress. Please retry.",
+    409,
+  );
+}
+
+/* Proctoring discrete events (deduplicated by window). */
 const DISCRETE_EVENT_TYPES = [
   "fullscreen_exit",
   "tab_switch",

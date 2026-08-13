@@ -118,7 +118,10 @@ function questionsFor(
 
 function makePackage(packageId: string): FinalPackageV1 {
   const questions = questionsFor([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]).map(
-    (question) => ({ ...question, question_hash: canonicalQuestionHash(question) }),
+    (question) => {
+      const unique = { ...question, question_id: `${packageId}-${question.question_id}` };
+      return { ...unique, question_hash: canonicalQuestionHash(unique) };
+    },
   );
   const mcqs = questions.filter((question) => question.type === "mcq");
   const essays = questions.filter((question) => question.type === "essay");
@@ -265,16 +268,24 @@ test.describe.serial("grounded cumulative final publication and delivery", () =>
 
     // 1. A final cannot start before a validated package is published: an empty
     //    bank is an explicit failure, never permission to fabricate questions.
+    const authorizedAt = new Date();
+    const startWindow = {
+      final_form: "primary" as const,
+      authorized_at: authorizedAt.toISOString(),
+      access_opens_at: new Date(authorizedAt.getTime() - 60_000).toISOString(),
+      access_expires_at: new Date(authorizedAt.getTime() + 24 * 60 * 60_000).toISOString(),
+    };
     const earlyStart = await api.post(`${baseUrl}/api/exams/final/start`, {
       data: {
         student_id: learnerId,
         curriculum_id: curriculumId,
         student_sid: learnerSid,
+        ...startWindow,
       },
     });
     expect(earlyStart.status()).toBe(500);
     const earlyFailure = (await earlyStart.json()) as { error: string };
-    expect(earlyFailure.error).toMatch(/No published final questions/);
+    expect(earlyFailure.error).toMatch(/two disjoint forms|Two distinct published final packages/);
 
     const blueprintId = await ensureBlueprint(api);
 
@@ -325,12 +336,24 @@ test.describe.serial("grounded cumulative final publication and delivery", () =>
     expect(replay.status).toBe("accepted");
     expect(replay.idempotent).toBe(true);
 
+    const reservePkg = makePackage("pkg-cs301-final-0002");
+    const reserveResponse = await api.post(
+      `${baseUrl}/api/assessments/final/publish`,
+      {
+        headers: takeHeaders,
+        data: { ...reservePkg, blueprint_id: blueprintId },
+      },
+    );
+    expect(reserveResponse.status()).toBe(201);
+    expect((await reserveResponse.json()) as { status: string }).toMatchObject({ status: "accepted" });
+
     // 3. Start the final and take it.
     const finalStart = await api.post(`${baseUrl}/api/exams/final/start`, {
       data: {
         student_id: learnerId,
         curriculum_id: curriculumId,
         student_sid: learnerSid,
+        ...startWindow,
       },
     });
     expect(finalStart.ok()).toBe(true);

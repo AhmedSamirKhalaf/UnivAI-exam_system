@@ -48,6 +48,8 @@ test("invalid proctoring event is rejected", () => {
     student_id: "64b000000000000000000001",
     student_sid: null,
     chapter_id: null,
+    attempt_number: 1,
+    final_form: null,
     mark: null,
     total_questions: 0,
     max_score: 0,

@@ -17,6 +17,7 @@ export const examSessionSchema = z.object({
   current_question_index: z.number().int().min(0).default(0),
   answer_revision: z.number().int().min(0).default(0),
   answers: z.array(z.record(z.string(), z.unknown())).default([]),
+  session_generation: z.number().int().min(0).default(0),
   terminated_reason: z
     .enum([
       "suspicion_threshold",

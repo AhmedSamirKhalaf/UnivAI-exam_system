@@ -4,7 +4,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { connectDB } from "@/lib/db";
 import { verifyStandaloneToken, isStandalone } from "@/lib/runtime";
-import { verifyExamAttemptToken } from "@/lib/exam-attempt";
+import { isNewerSessionGeneration, verifyExamAttemptToken } from "@/lib/exam-attempt";
 import {
   evidenceValueFor,
   parseSocketPayload,
@@ -81,6 +81,17 @@ async function authenticate(
   if (!token) return null;
   const session = await verifyExamAttemptToken(state.examId, token);
   return session?.status === "in_progress" ? session : null;
+}
+
+async function isCurrentSessionConnection(state: ConnectionState): Promise<boolean> {
+  if (!state.session) return false;
+  const current = await ExamSession.exists({
+    _id: state.session._id,
+    status: "in_progress",
+    session_generation: state.session.session_generation,
+    active_connection_id: state.connectionId,
+  });
+  return Boolean(current);
 }
 
 async function updateSessionState(
@@ -317,6 +328,14 @@ export function attachIntegrityWebSocketServer(
         if (state.messageCount > 100) return close(socket, 1008, "Message rate exceeded");
 
         const message = parseSocketPayload(data.toString("utf8"));
+        if (
+          state.authenticated &&
+          message.type !== "authenticate" &&
+          !(await isCurrentSessionConnection(state))
+        ) {
+          send(socket, { version: 1, type: "session_replaced" });
+          return close(socket, 4401, "Exam session was replaced by a newer launch");
+        }
         if (message.type === "authenticate") {
           if (state.authenticated) return close(socket, 1008, "Already authenticated");
           await connectDB();
@@ -329,10 +348,17 @@ export function attachIntegrityWebSocketServer(
 
           const existing = activeConnections.get(state.examId);
           if (existing && existing.socket.readyState === WebSocket.OPEN) {
-            await lockSession(state, socket, "A second active exam connection was opened", "duplicate_session");
-            send(existing.socket, { version: 1, type: "locked", reason: "A second active exam connection was opened" });
-            close(existing.socket, 4403, "Duplicate exam connection");
-            return;
+            const incomingGeneration = session.session_generation ?? 0;
+            const existingGeneration = existing.state.session?.session_generation ?? 0;
+            if (isNewerSessionGeneration(incomingGeneration, existingGeneration)) {
+              send(existing.socket, { version: 1, type: "session_replaced" });
+              close(existing.socket, 4401, "Exam session was replaced by a newer launch");
+            } else {
+              await lockSession(state, socket, "A second active exam connection was opened", "duplicate_session");
+              send(existing.socket, { version: 1, type: "locked", reason: "A second active exam connection was opened" });
+              close(existing.socket, 4403, "Duplicate exam connection");
+              return;
+            }
           }
           activeConnections.set(state.examId, { socket, state });
           await updateSessionState(state, "reconnecting", {

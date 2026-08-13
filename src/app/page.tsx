@@ -1,18 +1,21 @@
 import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { translateExam } from "@/i18n/exam-locale";
+import { getRequestExamLocale } from "@/i18n/request-locale";
 
-export default function Home() {
+export default async function Home() {
+  const locale = await getRequestExamLocale();
+  const t = (key: Parameters<typeof translateExam>[1]) => translateExam(locale, key);
+
   return (
     <Stack spacing={3}>
-      <Typography variant="h4">UnivAI Exams</Typography>
+      <Typography variant="h4" component="h1">{t("homeTitle")}</Typography>
       <Typography variant="body1" color="text.secondary">
-        This service holds the quizzes and exams for a UnivAI course. Students do not
-        browse it directly: the UnivAI app opens an exam here when its window is open.
+        {t("homeDescription")}
       </Typography>
       <Alert severity="info">
-        Arrived here by accident? Go back to the UnivAI app and open your exam from the
-        Exams page — it knows which one is due.
+        {t("homeAccidental")}
       </Alert>
     </Stack>
   );

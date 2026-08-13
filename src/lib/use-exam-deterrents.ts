@@ -11,6 +11,7 @@ import {
   ensureExamDebugDeterrent,
   stopExamDebugDeterrent,
 } from "@/lib/devtools-deterrent";
+import { useExamLocale } from "@/i18n/ExamLocaleProvider";
 
 type SendEvent = (
   type: IntegrityEventType,
@@ -49,6 +50,8 @@ export function useExamDeterrents({
   onFullscreenChange,
   onDevToolsChange,
 }: Options): void {
+  const { t } = useExamLocale();
+
   useEffect(() => {
     if (!enabled) return;
     const registry = new ExamListenerRegistry("exam-listeners-v2");
@@ -127,10 +130,10 @@ export function useExamDeterrents({
       event.stopPropagation();
       if (event.repeat) return;
       sendEvent("restricted_shortcut", { shortcut, confidence: "direct" });
-      onBlockedAction(`${shortcut} is disabled during an active exam.`);
+      onBlockedAction(t("shortcutDisabled", { shortcut }));
     }) as EventListener, { capture: true });
     register("context-menu", document, "contextmenu", (event) => {
-      block(event, "context_menu_attempt", "Right-click is disabled during an active exam.", {
+      block(event, "context_menu_attempt", t("rightClickDisabled"), {
         target: event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
           ? "answer-control"
           : "exam-content",
@@ -140,7 +143,14 @@ export function useExamDeterrents({
     for (const clipboardType of ["copy", "cut", "paste"] as const) {
       register(`clipboard-${clipboardType}`, document, clipboardType, (event) => {
         const eventType = `clipboard_${clipboardType}_attempt` as IntegrityEventType;
-        block(event, eventType, `${clipboardType[0].toUpperCase()}${clipboardType.slice(1)} is disabled during an active exam.`, {
+        const action = t(
+          clipboardType === "copy"
+            ? "copyAction"
+            : clipboardType === "cut"
+              ? "cutAction"
+              : "pasteAction",
+        );
+        block(event, eventType, t("clipboardDisabled", { action }), {
           target: event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
             ? "answer-control"
             : "exam-content",
@@ -149,10 +159,10 @@ export function useExamDeterrents({
     }
 
     register("drag-start", document, "dragstart", (event) => {
-      block(event, "drag_start_attempt", "Dragging exam content is disabled.", { target: "exam-content" });
+      block(event, "drag_start_attempt", t("draggingDisabled"), { target: "exam-content" });
     }, { capture: true });
     register("drop", document, "drop", ((event: DragEvent) => {
-      block(event, "drop_attempt", "Dropping content into the exam is disabled.", {
+      block(event, "drop_attempt", t("droppingDisabled"), {
         item_count: event.dataTransfer?.items.length ?? 0,
       });
     }) as EventListener, { capture: true });
@@ -182,11 +192,11 @@ export function useExamDeterrents({
     register("network-offline", window, "offline", () => sendEvent("network_offline"));
     register("history-navigation", window, "popstate", () => {
       sendEvent("history_navigation_attempt");
-      onBlockedAction("Leaving this page can pause your exam. Use the exam controls instead.");
+      onBlockedAction(t("leavingPageWarning"));
     });
     register("before-print", window, "beforeprint", () => {
       sendEvent("print_attempt");
-      onBlockedAction("Printing is not allowed during an active exam.");
+      onBlockedAction(t("printingDisabled"));
     });
     register("after-print", window, "afterprint", () => sendEvent("print_dialog_closed"));
     register("csp-violation", document, "securitypolicyviolation", ((event: SecurityPolicyViolationEvent) => {
@@ -210,7 +220,7 @@ export function useExamDeterrents({
           : "";
         if (!otherTab || otherTab === tabId) return;
         sendEvent("duplicate_attempt_context", { detected: true });
-        onBlockedAction("Another tab opened this exam. The server may lock this attempt.");
+        onBlockedAction(t("anotherTabWarning"));
       }) as EventListener);
       channel.postMessage({ tabId, state: "active" });
     }
@@ -267,5 +277,5 @@ export function useExamDeterrents({
       channel?.close();
       if (registryRef.current === registry) registryRef.current = null;
     };
-  }, [enabled, onBlockedAction, onDevToolsChange, onFullscreenChange, registryRef, sendEvent]);
+  }, [enabled, onBlockedAction, onDevToolsChange, onFullscreenChange, registryRef, sendEvent, t]);
 }

@@ -3,6 +3,7 @@ import mongoose, { Schema, Model, Document } from "mongoose";
 export interface IStudent extends Document {
   _id: mongoose.Types.ObjectId;
   name: string;
+  sid?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -10,6 +11,7 @@ export interface IStudent extends Document {
 const studentSchema = new Schema<IStudent>(
   {
     name: { type: String, required: true },
+    sid: { type: String, index: true },
   },
   { timestamps: true }
 );

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const createMidSchema = z
   .object({
     curriculum_id: z.string().min(1),
+    student_id: z.string().regex(/^[0-9a-fA-F]{24}$/),
+    student_sid: z.string().trim().min(1).max(120),
     title: z.string().min(1),
     chapter_ids: z
       .array(z.string())
