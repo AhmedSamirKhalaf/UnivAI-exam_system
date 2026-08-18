@@ -33,7 +33,7 @@ export async function POST(
 
       // Result + proctoring report go back to the UnivAI app. Fire-and-forget:
       // a dead webhook must never break a student's submission.
-      void sendResultWebhook(exam);
+      if (exam.type !== "practice") void sendResultWebhook(exam);
 
       return getExamAttemptView(examId);
     };

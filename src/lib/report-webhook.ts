@@ -231,6 +231,7 @@ async function deliverVersion(
  * and never rolls back a student's submission or an instructor's grade.
  */
 export async function sendResultWebhook(exam: IExam): Promise<void> {
+  if (exam.type === "practice") return;
   if (!process.env.RESULT_WEBHOOK_URL && !isStandalone()) return;
 
   try {
@@ -246,6 +247,7 @@ export async function retryPendingResultWebhooks(): Promise<void> {
 
   const now = new Date();
   const candidates = await Exam.find({
+    type: { $ne: "practice" },
     $expr: {
       $gt: [
         "$result_webhook_version",

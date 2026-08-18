@@ -6,7 +6,7 @@ import {
 } from "../schemas/question-provenance";
 import { gradeQuestionSnapshot } from "../lib/source-grounded-grading";
 
-export type ExamType = "quiz" | "mid" | "final";
+export type ExamType = "quiz" | "mid" | "final" | "practice";
 export type GradingStatus = "auto_graded" | "pending_review" | "graded";
 export type IntegrityStatus = "clean" | "invalidated";
 export type PolicyAction = "none" | "session_invalidated";
@@ -66,7 +66,7 @@ const examSchema = new Schema<IExam>(
   {
     type: {
       type: String,
-      enum: ["quiz", "mid", "final"],
+      enum: ["quiz", "mid", "final", "practice"],
       required: true,
     },
     title: { type: String, required: true },
@@ -318,6 +318,13 @@ examSchema.index(
   {
     unique: true,
     partialFilterExpression: { type: "final", final_form: { $exists: true } },
+  },
+);
+examSchema.index(
+  { student_id: 1, package_id: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: "practice", package_id: { $exists: true } },
   },
 );
 examSchema.index({ result_webhook_next_attempt_at: 1 });

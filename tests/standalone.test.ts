@@ -94,7 +94,7 @@ test("developer-tools dimension signal ignores normal browser chrome", () => {
 });
 
 test("restricted developer-tools shortcuts are cross-platform and specific", () => {
-  const base = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  const base = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
   assert.equal(getRestrictedShortcut({ ...base, key: "F12" }), "F12");
   assert.equal(
     getRestrictedShortcut({ ...base, key: "i", ctrlKey: true, shiftKey: true }),
@@ -105,4 +105,8 @@ test("restricted developer-tools shortcuts are cross-platform and specific", () 
     "Meta+Alt+J"
   );
   assert.equal(getRestrictedShortcut({ ...base, key: "i", ctrlKey: true }), null);
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "ه", code: "KeyI", ctrlKey: true, shiftKey: true }),
+    "Ctrl+Shift+I",
+  );
 });

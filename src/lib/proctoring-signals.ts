@@ -9,6 +9,7 @@ type WindowDimensions = {
 
 type ShortcutEvent = {
   key: string;
+  code?: string;
   ctrlKey: boolean;
   metaKey: boolean;
   altKey: boolean;
@@ -42,7 +43,10 @@ export function getDevToolsDimensionSignal(
 
 /** Return a stable label for common developer-tools/source-view shortcuts. */
 export function getRestrictedShortcut(event: ShortcutEvent): string | null {
-  const key = event.key.toLowerCase();
+  const physicalKey = /^Key[A-Z]$/.test(event.code ?? "")
+    ? (event.code ?? "").slice(3).toLowerCase()
+    : null;
+  const key = physicalKey ?? event.key.toLowerCase();
   if (key === "f12") return "F12";
   if (key === "printscreen") return "PrintScreen";
 

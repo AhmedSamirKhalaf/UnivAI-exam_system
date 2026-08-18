@@ -719,6 +719,113 @@ async function resetExamSession(
   });
 }
 
+export type PracticePackageInput = {
+  studentId: string;
+  curriculumId: string;
+  chapterId: string;
+  studentSid: string;
+  packageId: string;
+  title: string;
+  planVersion: string;
+  questions: Record<string, unknown>[];
+};
+
+/**
+ * Store one immutable, learner-owned practice package and create its only
+ * proctored attempt. Replaying the same package rotates the launch token and
+ * resumes its server-saved session; a submitted package can never be reset.
+ */
+export async function startPractice(
+  input: PracticePackageInput,
+  now: Date = new Date(),
+): Promise<{ exam: IExam; created: boolean; resumed: boolean }> {
+  const studentId = new mongoose.Types.ObjectId(input.studentId);
+  const curriculumId = new mongoose.Types.ObjectId(input.curriculumId);
+  const chapterId = new mongoose.Types.ObjectId(input.chapterId);
+
+  if (!(await isEnrolled(studentId, curriculumId))) {
+    throw new ExamAttemptError("Student is not enrolled in this curriculum", 403);
+  }
+  const chapter = await Chapter.findOne({ _id: chapterId, curriculum_id: curriculumId });
+  if (!chapter) throw new ExamAttemptError("Practice chapter not found", 404);
+
+  const existing = await Exam.findOne({
+    type: "practice",
+    student_id: studentId,
+    package_id: input.packageId,
+  });
+  if (existing) {
+    if (existing.student_sid !== input.studentSid) {
+      throw new ExamAttemptError("Practice package does not belong to this registration", 403);
+    }
+    if (existing.taken) {
+      throw new ExamAttemptError("This practice package has already been submitted", 409);
+    }
+    const session = await ExamSession.findOne({ exam_id: existing._id });
+    if (!session || session.status !== "in_progress") {
+      throw new ExamAttemptError("Practice attempt is no longer active", 409);
+    }
+    return { exam: existing, created: false, resumed: true };
+  }
+
+  const exam = await Exam.create({
+    type: "practice",
+    title: input.title,
+    student_id: studentId,
+    student_sid: input.studentSid,
+    curriculum_id: curriculumId,
+    chapter_id: chapterId,
+    package_id: input.packageId,
+    package_version: "practice-package-v1",
+    plan_version: input.planVersion,
+    questions_snapshot: input.questions,
+    generated_questions: input.questions,
+    student_answers: [],
+    attempt_number: 1,
+    taken: false,
+    passing_mark: 3,
+    passed: false,
+    grading_status: "auto_graded",
+    integrity_status: "clean",
+    policy_action: "none",
+    review_status: "not_required",
+  });
+  await resetExamSession(exam, studentId, now);
+  await writeAudit({
+    actor: { type: "student", id: studentId.toString() },
+    action: "attempt.start",
+    resource: { type: "exam", id: exam._id.toString() },
+    metadata: {
+      exam_type: "practice",
+      package_id: input.packageId,
+      chapter_id: chapterId.toString(),
+      question_count: input.questions.length,
+      attempt_number: 1,
+    },
+  });
+  return { exam, created: true, resumed: false };
+}
+
+export async function resumePractice(
+  examId: string,
+  studentId: string,
+  studentSid: string,
+): Promise<IExam> {
+  const exam = await Exam.findOne({
+    _id: new mongoose.Types.ObjectId(examId),
+    type: "practice",
+    student_id: new mongoose.Types.ObjectId(studentId),
+    student_sid: studentSid,
+  });
+  if (!exam) throw new ExamAttemptError("Practice attempt not found", 404);
+  if (exam.taken) throw new ExamAttemptError("This practice package has already been submitted", 409);
+  const session = await ExamSession.findOne({ exam_id: exam._id });
+  if (!session || session.status !== "in_progress") {
+    throw new ExamAttemptError("Practice attempt is no longer active", 409);
+  }
+  return exam;
+}
+
 /* ------------------------------------------------------------------ */
 /*   startMid — policy-gated start on a pre-created Exam               */
 /* ------------------------------------------------------------------ */
@@ -1789,7 +1896,7 @@ export async function submitExam(
   exam.taken = true;
 
   gradeExamSubmission(exam, studentAnswers);
-  queueResultWebhookRevision(exam);
+  if (exam.type !== "practice") queueResultWebhookRevision(exam);
 
   await exam.save();
 
@@ -1805,14 +1912,16 @@ export async function submitExam(
   // A submitted attempt is terminal: freeze the ledger record with its
   // durable evidence. Cooldown begins from this server-recorded time. A retry
   // therefore can never refund or erase this attempt.
-  await finalizeActiveRecordForSourceExam(
-    exam._id,
-    "submitted",
-    session?.ended_at ?? new Date(),
-    buildTerminalEvidence(exam, session ?? null),
-  );
+  if (exam.type !== "practice") {
+    await finalizeActiveRecordForSourceExam(
+      exam._id,
+      "submitted",
+      session?.ended_at ?? new Date(),
+      buildTerminalEvidence(exam, session ?? null),
+    );
+  }
 
-  if (exam.integrity_status === "invalidated") {
+  if (exam.type !== "practice" && exam.integrity_status === "invalidated") {
     await notifyIntegrityInvalidation(exam);
   }
 

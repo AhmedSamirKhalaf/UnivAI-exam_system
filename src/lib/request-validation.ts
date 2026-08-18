@@ -29,6 +29,62 @@ const studentSidString = z.string().trim().min(1).max(120);
 const shortName = z.string().trim().min(1).max(120);
 const noteString = z.string().trim().min(1).max(2000);
 
+const practiceQuestionSchema = z
+  .object({
+    schema_version: z.literal("question-provenance-v1"),
+    question_id: z.string().trim().min(1).max(160),
+    prompt: z.string().trim().min(1).max(2_000),
+    type: z.literal("mcq"),
+    options: z.array(z.string().trim().min(1).max(1_000)).length(4),
+    correct_option: z.string().trim().min(1).max(1_000),
+    plan_version: z.string().trim().min(1).max(160),
+    approved: z.literal(true),
+    provenance: z.object({
+      document_id: z.string().trim().min(1).max(160),
+      document_title: z.string().trim().min(1).max(500),
+      page_number: z.number().int().min(1),
+      section: z.string().trim().min(1).max(500),
+      excerpt: z.string().trim().min(1).max(2_000).optional(),
+    }).strict(),
+  })
+  .strict()
+  .superRefine((question, context) => {
+    if (new Set(question.options).size !== question.options.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: "Practice answer options must be unique",
+      });
+    }
+    if (!question.options.includes(question.correct_option)) {
+      context.addIssue({
+        code: "custom",
+        path: ["correct_option"],
+        message: "correct_option must match one supplied option",
+      });
+    }
+  });
+
+export const startPracticeSchema = z
+  .object({
+    student_id: objectIdString,
+    curriculum_id: objectIdString,
+    chapter_id: objectIdString,
+    student_sid: studentSidString,
+    package_id: z.string().trim().min(8).max(160),
+    title: z.string().trim().min(1).max(300),
+    plan_version: z.string().trim().min(1).max(160),
+    questions: z.array(practiceQuestionSchema).length(5),
+  })
+  .strict();
+
+export const resumePracticeSchema = z
+  .object({
+    student_id: objectIdString,
+    student_sid: studentSidString,
+  })
+  .strict();
+
 export const startQuizSchema = z
   .object({
     student_id: objectIdString,

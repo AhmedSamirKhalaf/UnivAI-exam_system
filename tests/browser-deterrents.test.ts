@@ -4,6 +4,7 @@ import test from "node:test";
 import { getRestrictedShortcut } from "../src/lib/proctoring-signals";
 
 const base = {
+  code: "",
   ctrlKey: false,
   metaKey: false,
   altKey: false,
@@ -37,6 +38,21 @@ test("main-thread deterrents have no pause trap or sensitive payload collection"
   assert.equal(source.includes("clipboardData.getData"), false);
   assert.equal(source.includes("event.key,"), false);
   assert.equal(source.includes("innerHTML"), false);
+});
+
+test("restricted shortcuts use physical keys on non-Latin keyboard layouts", () => {
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "ه", code: "KeyI", ctrlKey: true, shiftKey: true }),
+    "Ctrl+Shift+I",
+  );
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "ت", code: "KeyJ", ctrlKey: true, shiftKey: true }),
+    "Ctrl+Shift+J",
+  );
+  assert.equal(
+    getRestrictedShortcut({ ...base, key: "ؤ", code: "KeyC", ctrlKey: true, shiftKey: true }),
+    "Ctrl+Shift+C",
+  );
 });
 
 test("a main-page IIFE repeatedly pauses when an inspector is listening", async () => {

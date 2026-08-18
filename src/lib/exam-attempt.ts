@@ -20,7 +20,7 @@ export type PublicQuestion = {
 
 export type ExamAttemptView = {
   _id: string;
-  type: "quiz" | "mid" | "final";
+  type: "quiz" | "mid" | "final" | "practice";
   title: string;
   taken: boolean;
   integrity_status: "clean" | "invalidated";
@@ -287,7 +287,9 @@ export async function getExamAttemptView(
   const session = knownSession === undefined
     ? await ExamSession.findOne({ exam_id: exam._id })
     : knownSession;
-  const policy = await getAttemptPolicySnapshot(exam);
+  const policy = exam.type === "practice"
+    ? undefined
+    : await getAttemptPolicySnapshot(exam);
   return buildExamAttemptView(exam, session ?? null, policy);
 }
 
@@ -297,7 +299,9 @@ export async function createExamLaunch(
 ): Promise<ExamAttemptView & { attempt_token: string; launch_url: string }> {
   const attemptToken = await issueExamAttemptToken(exam._id);
   const session = await ExamSession.findOne({ exam_id: exam._id });
-  const policy = await getAttemptPolicySnapshot(exam);
+  const policy = exam.type === "practice"
+    ? undefined
+    : await getAttemptPolicySnapshot(exam);
   const view = buildExamAttemptView(exam, session, policy);
   return {
     ...view,
@@ -325,7 +329,9 @@ export async function saveCurrentAnswer(
   }
 
   if (session.last_action_id === input.idempotency_key) {
-    const policy = await getAttemptPolicySnapshot(exam);
+    const policy = exam.type === "practice"
+      ? undefined
+      : await getAttemptPolicySnapshot(exam);
     return { ...buildExamAttemptView(exam, session, policy), idempotent: true };
   }
 
@@ -367,7 +373,9 @@ export async function saveCurrentAnswer(
   );
   if (!updated) throw new ExamAttemptError("Answer state changed; reload the current question", 409);
 
-  const policy = await getAttemptPolicySnapshot(exam);
+  const policy = exam.type === "practice"
+    ? undefined
+    : await getAttemptPolicySnapshot(exam);
   return { ...buildExamAttemptView(exam, updated, policy), idempotent: false };
 }
 

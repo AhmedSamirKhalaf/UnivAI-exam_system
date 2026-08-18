@@ -72,10 +72,11 @@ test("motion follows the system preference and collapses for reduced motion", ()
   assert.match(theme, /animationIterationCount: "1 !important"/);
 });
 
-test("generated exam content remains an explicit English LTR island", () => {
-  const englishIslands = runner.match(/lang="en"[\s\S]{0,80}dir="ltr"/g) ?? [];
-  assert.ok(englishIslands.length >= 4, "title, prompt, and option states need English islands");
+test("generated exam content preserves its authored language and direction", () => {
+  const authoredIslands = runner.match(/dir="auto"/g) ?? [];
+  assert.ok(authoredIslands.length >= 4, "title, prompt, and option states need authored-language islands");
   assert.match(runner, /className="exam-generated-content"/);
+  assert.doesNotMatch(runner, /lang="en"/);
   assert.match(runner, /\{exam\.title\}/);
   assert.match(runner, /\{question\.prompt\}/);
   assert.match(runner, /\{option\}/);

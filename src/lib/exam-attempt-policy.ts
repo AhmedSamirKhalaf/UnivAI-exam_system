@@ -637,6 +637,13 @@ export function attemptScopeForExam(exam: IExam): {
   type: AttemptAssessmentType;
   assessmentId: string | mongoose.Types.ObjectId;
 } {
+  if (exam.type === "practice") {
+    throw new AttemptPolicyError(
+      "Practice packages use a single saved attempt and no official attempt policy",
+      400,
+      evaluateAttemptPolicy("practice", new Date(), []),
+    );
+  }
   const type: AttemptAssessmentType = exam.type;
   const assessmentId =
     type === "quiz"

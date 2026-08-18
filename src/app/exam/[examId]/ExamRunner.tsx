@@ -84,7 +84,7 @@ type AttemptPolicy = {
 
 type ExamAttempt = {
   _id: string;
-  type: "quiz" | "mid" | "final";
+  type: "quiz" | "mid" | "final" | "practice";
   title: string;
   taken: boolean;
   integrity_status: "clean" | "invalidated";
@@ -561,9 +561,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                   <Typography variant="overline">{t("submissionReceived")}</Typography>
                   <Typography
                     variant="h4"
-                    component="h1"
-                    lang="en"
-                    dir="ltr"
+                    component="h1" dir="auto"
                     className="exam-generated-content"
                   >
                     {exam.title}
@@ -720,7 +718,9 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                         ? "quizLabel"
                         : exam.type === "mid"
                           ? "midtermLabel"
-                          : "finalLabel",
+                          : exam.type === "practice"
+                            ? "practiceLabel"
+                            : "finalLabel",
                     )} · ${t("questionCount", { count: exam.progress.total })}`}
                     color="primary"
                     variant="outlined"
@@ -728,9 +728,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                 </span>
                 <Typography
                   variant="h4"
-                  component="h1"
-                  lang="en"
-                  dir="ltr"
+                  component="h1" dir="auto"
                   className="exam-generated-content"
                 >
                   {exam.title}
@@ -841,15 +839,15 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                         ? "quizLabel"
                         : exam.type === "mid"
                           ? "midtermLabel"
-                          : "finalLabel",
+                          : exam.type === "practice"
+                            ? "practiceLabel"
+                            : "finalLabel",
                     ),
                   })}
                 </Typography>
                 <Typography
                   variant="h5"
-                  component="h1"
-                  lang="en"
-                  dir="ltr"
+                  component="h1" dir="auto"
                   className="exam-generated-content"
                 >
                   {exam.title}
@@ -920,9 +918,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                   <Typography variant="overline" color="primary">{t("currentQuestion")}</Typography>
                   <Typography
                     variant="h5"
-                    component="h2"
-                    lang="en"
-                    dir="ltr"
+                    component="h2" dir="auto"
                     className="exam-generated-content"
                   >
                     {question.prompt}
@@ -939,7 +935,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                           value={option.slice(0, 1)}
                           control={<Radio />}
                           label={
-                            <span lang="en" dir="ltr" className="exam-generated-content">
+                            <span dir="auto" className="exam-generated-content">
                               {option}
                             </span>
                           }
