@@ -1061,16 +1061,14 @@ export async function createMid(
 
   const bindChapters = async (examId: mongoose.Types.ObjectId): Promise<void> => {
     await Promise.all(
-      chapterIds.map((chapterId) =>
-        ExamChapter.updateOne(
-          {
-            chapter_id: new mongoose.Types.ObjectId(chapterId.toString()),
-            exam_id: examId,
-          },
-          { $setOnInsert: { createdAt: new Date(), updatedAt: new Date() } },
+      chapterIds.map((chapterId) => {
+        const chapterObjectId = new mongoose.Types.ObjectId(chapterId.toString());
+        return ExamChapter.updateOne(
+          { chapter_id: chapterObjectId, exam_id: examId },
+          { $setOnInsert: { chapter_id: chapterObjectId, exam_id: examId } },
           { upsert: true },
-        ),
-      ),
+        );
+      }),
     );
   };
 
