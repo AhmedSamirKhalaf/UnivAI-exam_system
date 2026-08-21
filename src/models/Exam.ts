@@ -43,6 +43,8 @@ export interface IExam extends Document {
   generated_questions?: Record<string, unknown>[];
   student_answers?: Record<string, unknown>[];
   taken: boolean;
+  raw_mark?: number;
+  integrity_penalty_applied?: boolean;
   mark?: number;
   passing_mark?: number;
   passed: boolean;
@@ -115,6 +117,8 @@ const examSchema = new Schema<IExam>(
     generated_questions: { type: Schema.Types.Mixed },
     student_answers: { type: Schema.Types.Mixed },
     taken: { type: Boolean, required: true, default: false },
+    raw_mark: { type: Number },
+    integrity_penalty_applied: { type: Boolean, default: false },
     mark: { type: Number },
     passing_mark: { type: Number },
     passed: { type: Boolean, required: true, default: false },

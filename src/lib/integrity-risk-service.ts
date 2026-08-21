@@ -7,15 +7,18 @@ import { scoreIntegrityTimeline } from "@/lib/integrity-risk";
 const scheduled = new Map<string, NodeJS.Timeout>();
 
 export async function refreshIntegrityRisk(examId: string | Types.ObjectId): Promise<void> {
-  const events = await IntegrityEvent.find({ exam_id: examId })
+  const session = await ExamSession.findOne({ exam_id: examId }).select({ started_at: 1 });
+  const events = await IntegrityEvent.find({
+    exam_id: examId,
+    ...(session?.started_at ? { received_at: { $gte: session.started_at } } : {}),
+  })
     .sort({ occurred_at: 1 })
     .limit(1_000)
-    .select({ event_type: 1, occurred_at: 1 })
+    .select({ event_type: 1, occurred_at: 1, details: 1 })
     .lean();
   const result = scoreIntegrityTimeline(events);
   const riskFields: Record<string, unknown> = {
     suspicion_score: result.reviewPriority,
-    flagged: result.band !== "observe",
     risk_score: result.reviewPriority,
     risk_band: result.band,
     risk_model_version: result.modelVersion,
@@ -35,7 +38,10 @@ export async function refreshIntegrityRisk(examId: string | Types.ObjectId): Pro
   await ExamSession.updateOne(
     { exam_id: examId },
     {
-      $set: riskFields,
+      $set: {
+        ...riskFields,
+        ...(result.band !== "observe" ? { flagged: true } : {}),
+      },
       ...(result.probability === null ? { $unset: { risk_probability: "" } } : {}),
     },
   );

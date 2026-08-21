@@ -15,6 +15,7 @@ import {
   MongoIdempotencyStore,
   withIdempotency,
 } from "@/lib/idempotency";
+import { finalizeExpiredTimedExam } from "@/lib/timed-exam";
 
 export async function POST(
   request: NextRequest,
@@ -25,6 +26,10 @@ export async function POST(
     const { examId } = await params;
     await requireExamAttempt(request, examId);
     examRateLimiter.enforce({ kind: "session", id: examId });
+
+    if (await finalizeExpiredTimedExam(examId)) {
+      return Response.json(await getExamAttemptView(examId), { status: 200 });
+    }
 
     const idempotencyKey = idempotencyKeyFromRequest(request, `submit:${examId}`);
 

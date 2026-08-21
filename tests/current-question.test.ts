@@ -62,6 +62,8 @@ test("result metadata appears only after submission", () => {
     passed: true,
     integrity_status: "clean",
     review_status: "not_required",
+    flagged: false,
+    integrity_penalty_applied: false,
   });
   assert.equal(view.current_question, null);
 });

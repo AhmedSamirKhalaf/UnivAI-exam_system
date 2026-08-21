@@ -32,6 +32,7 @@ import { INTEGRITY_POLICY_VERSION, writeAudit } from "@/lib/audit-log";
 import { gradeExamSubmission } from "@/lib/submission-grading";
 import { sendResultWebhook } from "@/lib/report-webhook";
 import { queueResultWebhookRevision } from "@/lib/result-webhook-state";
+import { refreshIntegrityRisk } from "@/lib/integrity-risk-service";
 
 export type CanStartExamResult =
   | { allowed: true }
@@ -661,6 +662,8 @@ async function resetExamForAttempt(
   exam.generated_questions = questions;
   exam.student_answers = [];
   exam.taken = false;
+  exam.raw_mark = undefined;
+  exam.integrity_penalty_applied = false;
   exam.mark = undefined;
   exam.passed = false;
   exam.passing_mark = passingMark;
@@ -688,9 +691,16 @@ async function resetExamSession(
   const existing = await ExamSession.findOne({ exam_id: exam._id });
   if (existing) {
     existing.started_at = now;
+    existing.deadline_at = undefined;
     existing.ended_at = undefined;
     existing.suspicion_score = 0;
     existing.flagged = false;
+    existing.risk_score = 0;
+    existing.risk_probability = undefined;
+    existing.risk_band = "observe";
+    existing.risk_model_version = undefined;
+    existing.risk_explanation = undefined;
+    existing.risk_updated_at = undefined;
     existing.status = "in_progress";
     existing.terminated_reason = undefined;
     existing.current_question_index = 0;
@@ -1885,27 +1895,35 @@ export async function notifyIntegrityInvalidation(
 
 export async function submitExam(
   examId: string | mongoose.Types.ObjectId,
-  studentAnswers: Record<string, unknown>[]
+  studentAnswers: Record<string, unknown>[],
+  options: {
+    terminalReason?: "student_submitted" | "timeout";
+    terminalAt?: Date;
+  } = {},
 ): Promise<IExam> {
   const examIdObj = new mongoose.Types.ObjectId(examId.toString());
+  await refreshIntegrityRisk(examIdObj);
   const exam = await Exam.findById(examIdObj);
   if (!exam) throw new Error("Exam not found");
-  if (exam.taken) throw new Error("Exam already submitted");
+  if (exam.taken) return exam;
+
+  const session = await ExamSession.findOne({ exam_id: examIdObj });
 
   exam.student_answers = studentAnswers;
   exam.taken = true;
 
-  gradeExamSubmission(exam, studentAnswers);
+  gradeExamSubmission(exam, studentAnswers, {
+    flagged: session?.flagged ?? false,
+  });
   if (exam.type !== "practice") queueResultWebhookRevision(exam);
 
   await exam.save();
 
-  const session = await ExamSession.findOne({ exam_id: examIdObj });
   if (session) {
     session.status = "completed";
     session.integrity_state = "submitted";
-    session.ended_at = new Date();
-    session.terminated_reason = "student_submitted";
+    session.ended_at = options.terminalAt ?? new Date();
+    session.terminated_reason = options.terminalReason ?? "student_submitted";
     await session.save();
   }
 
@@ -1935,6 +1953,9 @@ export async function submitExam(
       integrity_status: exam.integrity_status,
       policy_action: exam.policy_action,
       mark: exam.mark ?? null,
+      raw_mark: exam.raw_mark ?? null,
+      integrity_penalty_applied: exam.integrity_penalty_applied ?? false,
+      flagged: session?.flagged ?? false,
       passed: exam.passed,
     },
   });

@@ -17,6 +17,23 @@ export interface ObjectiveScore {
   blank: number;
 }
 
+function optionLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = /^([A-Z])(?:[).:]|\s|$)/i.exec(trimmed);
+  return match?.[1].toUpperCase() ?? null;
+}
+
+function isCorrectObjectiveAnswer(response: string, correctOption: unknown): boolean {
+  if (typeof correctOption !== "string") return false;
+  const submitted = response.trim();
+  const correct = correctOption.trim();
+  if (submitted === correct) return true;
+  const submittedLabel = optionLabel(submitted);
+  const correctLabel = optionLabel(correct);
+  return submittedLabel !== null && correctLabel !== null && submittedLabel === correctLabel;
+}
+
 /**
  * American-style MCQ scoring used by every automatic grading path:
  * correct +1, incorrect -1, blank/omitted 0, with the paper total floored at 0.
@@ -74,7 +91,7 @@ export function scoreObjectiveAnswers(
       continue;
     }
 
-    if (response === question.correct_option) correct += 1;
+    if (isCorrectObjectiveAnswer(response, question.correct_option)) correct += 1;
     else incorrect += 1;
   }
 

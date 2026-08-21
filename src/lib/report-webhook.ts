@@ -1,6 +1,7 @@
 import { Exam, type IExam } from "@/models/Exam";
 import { ExamSession } from "@/models/ExamSession";
 import { ProctoringEvent } from "@/models/ProctoringEvent";
+import { IntegrityEvent } from "@/models/IntegrityEvent";
 import { resultWebhookSchema } from "@/lib/contracts";
 import { isStandalone } from "@/lib/runtime";
 import { signResultWebhook } from "@/lib/webhook-signature";
@@ -31,9 +32,20 @@ function retryDelayMs(attempts: number): number {
 
 async function buildPayload(exam: IExam) {
   const session = await ExamSession.findOne({ exam_id: exam._id });
-  const events = await ProctoringEvent.find({ exam_id: exam._id }).sort({
-    createdAt: 1,
-  });
+  const [events, integrityEvents] = await Promise.all([
+    ProctoringEvent.find({
+      exam_id: exam._id,
+      ...(session?.started_at ? { createdAt: { $gte: session.started_at } } : {}),
+    }).sort({ createdAt: 1 }),
+    IntegrityEvent.find({
+      exam_id: exam._id,
+      ...(session?.started_at ? { received_at: { $gte: session.started_at } } : {}),
+    })
+      .sort({ occurred_at: 1 })
+      .limit(1_000)
+      .select({ event_type: 1, occurred_at: 1, evidence_value: 1, details: 1 })
+      .lean(),
+  ]);
 
   return resultWebhookSchema.parse({
     exam_id: exam._id.toString(),
@@ -56,6 +68,10 @@ async function buildPayload(exam: IExam) {
     report: {
       suspicion_score: session?.suspicion_score ?? 0,
       flagged: session?.flagged ?? false,
+      raw_score: exam.raw_mark ?? exam.mark ?? null,
+      integrity_penalty_applied: exam.integrity_penalty_applied ?? false,
+      risk_band: session?.risk_band ?? "observe",
+      risk_explanation: session?.risk_explanation ?? null,
       session_status: session?.status ?? "unknown",
       started_at: session?.started_at ?? null,
       ended_at: session?.ended_at ?? null,
@@ -64,6 +80,12 @@ async function buildPayload(exam: IExam) {
         weight: event.weight,
         occurrences: event.occurrences,
         at: event.last_seen_at,
+      })),
+      integrity_events: integrityEvents.map((event) => ({
+        type: event.event_type,
+        at: event.occurred_at,
+        evidence_value: event.evidence_value,
+        details: event.details ?? {},
       })),
     },
   });

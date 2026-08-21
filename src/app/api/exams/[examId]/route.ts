@@ -5,6 +5,7 @@ import {
   getExamAttemptView,
   requireExamAttempt,
 } from "@/lib/exam-attempt";
+import { finalizeExpiredTimedExam } from "@/lib/timed-exam";
 
 export async function GET(
   _request: NextRequest,
@@ -13,8 +14,9 @@ export async function GET(
   try {
     await connectDB();
     const { examId } = await params;
-    const session = await requireExamAttempt(_request, examId);
-    return Response.json(await getExamAttemptView(examId, session));
+    await requireExamAttempt(_request, examId);
+    await finalizeExpiredTimedExam(examId);
+    return Response.json(await getExamAttemptView(examId));
   } catch (error: unknown) {
     return examAttemptErrorResponse(error);
   }

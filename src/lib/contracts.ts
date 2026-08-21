@@ -31,6 +31,10 @@ export const resultWebhookSchema = z.object({
   report: z.object({
     suspicion_score: z.number().min(0),
     flagged: z.boolean(),
+    raw_score: z.number().min(0).nullable().default(null),
+    integrity_penalty_applied: z.boolean().default(false),
+    risk_band: z.enum(["observe", "review", "high_review", "protocol_lock"]).default("observe"),
+    risk_explanation: z.record(z.string(), z.unknown()).nullable().default(null),
     session_status: z.string(),
     started_at: z.coerce.date().nullable(),
     ended_at: z.coerce.date().nullable(),
@@ -42,5 +46,16 @@ export const resultWebhookSchema = z.object({
         at: z.coerce.date(),
       })
     ),
+    integrity_events: z.array(
+      z.object({
+        type: z.string().min(1),
+        at: z.coerce.date(),
+        evidence_value: z.number().min(0),
+        details: z.record(
+          z.string(),
+          z.union([z.string(), z.number(), z.boolean(), z.null()]),
+        ),
+      }),
+    ).default([]),
   }),
 });

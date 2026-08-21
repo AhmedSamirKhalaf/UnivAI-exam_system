@@ -11,9 +11,14 @@ import { evaluateRiskPredictions } from "../src/lib/integrity-risk-evaluation";
 import { integrityEventMessageSchema } from "../src/lib/integrity-protocol";
 
 const at = (seconds: number): string => new Date(Date.UTC(2026, 7, 1, 10, 0, seconds)).toISOString();
-const event = (event_type: TimelineEvent["event_type"], seconds: number): TimelineEvent => ({
+const event = (
+  event_type: TimelineEvent["event_type"],
+  seconds: number,
+  details?: Record<string, unknown>,
+): TimelineEvent => ({
   event_type,
   occurred_at: at(seconds),
+  details,
 });
 
 test("one low-confidence dimension signal cannot independently raise a review", () => {
@@ -23,10 +28,39 @@ test("one low-confidence dimension signal cannot independently raise a review", 
   assert.equal(result.contributions.length, 0);
 });
 
-test("one window focus loss immediately flags the attempt for review", () => {
-  const result = scoreIntegrityTimeline([event("window_blur", 0)]);
+test("one focus loss over 900ms immediately flags the attempt for review", () => {
+  const result = scoreIntegrityTimeline([
+    event("window_blur", 0),
+    event("window_focus", 1, { blurred_ms: 901 }),
+  ]);
   assert.equal(result.band, "review");
   assert.ok(result.reviewPriority >= 35);
+});
+
+test("three short focus losses flag but one or two do not", () => {
+  const loss = (start: number, duration: number): TimelineEvent[] => [
+    event("window_blur", start),
+    event("window_focus", start + 1, { blurred_ms: duration }),
+  ];
+  assert.equal(scoreIntegrityTimeline(loss(0, 900)).band, "observe");
+  assert.equal(scoreIntegrityTimeline([...loss(0, 200), ...loss(2, 500)]).band, "observe");
+  const result = scoreIntegrityTimeline([
+    ...loss(0, 200),
+    ...loss(2, 500),
+    ...loss(4, 900),
+  ]);
+  assert.equal(result.band, "review");
+  assert.equal(result.features.shortFocusLossCount, 3);
+});
+
+test("three suspicious actions in any mix flag silently", () => {
+  const result = scoreIntegrityTimeline([
+    event("clipboard_copy_attempt", 0),
+    event("clipboard_paste_attempt", 1),
+    event("restricted_shortcut", 2),
+  ]);
+  assert.equal(result.band, "review");
+  assert.equal(result.features.suspiciousActionCount, 3);
 });
 
 test("the provisional policy adds a visible pair contribution", () => {
@@ -47,13 +81,14 @@ test("the provisional policy adds a visible pair contribution", () => {
   );
 });
 
-test("behavioral combinations request review but do not impersonate a protocol lock", () => {
+test("many behavioral problems request high review but do not impersonate a protocol lock", () => {
   const result = scoreIntegrityTimeline([
     event("restricted_shortcut", 0),
     event("restricted_shortcut", 1),
     event("clipboard_copy_attempt", 2),
     event("clipboard_copy_attempt", 3),
     event("duplicate_attempt_context", 4),
+    event("context_menu_attempt", 5),
   ]);
   assert.equal(result.band, "high_review");
   assert.equal(result.probability, null);

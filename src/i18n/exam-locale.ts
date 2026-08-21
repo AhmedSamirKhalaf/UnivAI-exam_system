@@ -43,6 +43,7 @@ const english = {
   timerUnavailable: "Timer unavailable",
   sessionActive: "Session active",
   elapsed: "Elapsed {time}",
+  timeRemaining: "Time left {time}",
   unavailable: "unavailable",
   attemptPolicy: "Attempt policy",
   policyQuiz: "Quiz: 2 attempts, 3 hours between attempts",
@@ -63,6 +64,9 @@ const english = {
   closeDeveloperToolsBeforeStart: "Close developer tools or large browser panels before starting the exam.",
   fullscreenBrowserRequired: "Fullscreen is required to take this exam. Use a browser that supports fullscreen.",
   fullscreenCouldNotStart: "Fullscreen could not start. Allow fullscreen, then try again.",
+  examStartFailed: "The exam timer could not start. Please try again.",
+  timeExpiredSubmissionFailed:
+    "Time ended, but automatic submission could not be confirmed. Refresh to retry safely.",
   examRemainsPaused: "The exam remains paused. Allow fullscreen, then try again.",
   saveAnswerFallback: "Could not save the answer.",
   questionSkippedSaved: "Question skipped and saved on the server.",
@@ -74,6 +78,9 @@ const english = {
   submissionReceived: "Submission received",
   answersStored: "Your accepted answers are stored on the server. You can safely leave this page.",
   resultHeldForReview: "Result held for integrity review",
+  flaggedScoreAdjusted: "Score adjusted after integrity flag",
+  flaggedScoreExplanation:
+    "You scored {rawScore}. This attempt was flagged, so half was applied and the recorded grade is {recordedScore}.",
   reviewStateExplanation:
     "This is a review state, not an automatic claim. Open UnivAI to see the recorded result and request support or an appeal.",
   manualGrading: "Manual grading in progress",
@@ -249,6 +256,7 @@ const arabic: Record<ExamMessageKey, string> = {
   timerUnavailable: "المؤقت غير متاح",
   sessionActive: "الجلسة نشطة",
   elapsed: "الوقت المنقضي {time}",
+  timeRemaining: "الوقت المتبقي {time}",
   unavailable: "غير متاح",
   attemptPolicy: "سياسة المحاولات",
   policyQuiz: "اختبار قصير: محاولتان، وبينهما 3 ساعات",
@@ -269,6 +277,9 @@ const arabic: Record<ExamMessageKey, string> = {
   closeDeveloperToolsBeforeStart: "أغلق أدوات المطور أو لوحات المتصفح الكبيرة قبل بدء الاختبار.",
   fullscreenBrowserRequired: "وضع ملء الشاشة مطلوب لهذا الاختبار. استخدم متصفحًا يدعم ملء الشاشة.",
   fullscreenCouldNotStart: "تعذر تشغيل ملء الشاشة. اسمح به ثم حاول مرة أخرى.",
+  examStartFailed: "تعذر بدء مؤقت الاختبار. حاول مرة أخرى.",
+  timeExpiredSubmissionFailed:
+    "انتهى الوقت، لكن تعذر تأكيد الإرسال التلقائي. حدّث الصفحة لإعادة المحاولة بأمان.",
   examRemainsPaused: "ما زال الاختبار متوقفًا. اسمح بملء الشاشة ثم حاول مرة أخرى.",
   saveAnswerFallback: "تعذر حفظ الإجابة.",
   questionSkippedSaved: "تم تخطي السؤال وحفظ ذلك على الخادم.",
@@ -280,6 +291,9 @@ const arabic: Record<ExamMessageKey, string> = {
   submissionReceived: "تم استلام الإرسال",
   answersStored: "إجاباتك المقبولة محفوظة على الخادم. يمكنك مغادرة هذه الصفحة بأمان.",
   resultHeldForReview: "النتيجة معلّقة لمراجعة النزاهة",
+  flaggedScoreAdjusted: "تم تعديل الدرجة بعد إشارة النزاهة",
+  flaggedScoreExplanation:
+    "حصلت على {rawScore}. تم وضع إشارة على هذه المحاولة، لذلك طُبق النصف وأصبحت الدرجة المسجلة {recordedScore}.",
   reviewStateExplanation:
     "هذه حالة مراجعة وليست اتهامًا تلقائيًا. افتح UnivAI لرؤية النتيجة المسجلة وطلب الدعم أو تقديم تظلم.",
   manualGrading: "التصحيح اليدوي جارٍ",

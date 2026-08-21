@@ -21,6 +21,7 @@ export interface IExamSession extends Document {
   exam_id: mongoose.Types.ObjectId;
   student_id: mongoose.Types.ObjectId;
   started_at: Date;
+  deadline_at?: Date;
   ended_at?: Date;
   suspicion_score: number;
   flagged: boolean;
@@ -70,6 +71,7 @@ const examSessionSchema = new Schema<IExamSession>(
       required: true,
     },
     started_at: { type: Date, required: true },
+    deadline_at: { type: Date },
     ended_at: { type: Date },
     suspicion_score: { type: Number, required: true, default: 0 },
     flagged: { type: Boolean, required: true, default: false },

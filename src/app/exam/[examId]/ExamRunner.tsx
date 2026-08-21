@@ -89,6 +89,8 @@ type ExamAttempt = {
   taken: boolean;
   integrity_status: "clean" | "invalidated";
   started_at?: string;
+  deadline_at?: string;
+  time_limit_seconds?: number;
   current_question: Question | null;
   progress: { position: number; total: number; answered: number };
   answer_revision: number;
@@ -99,11 +101,14 @@ type ExamAttempt = {
   attempt_statement?: string;
   result?: {
     grading_status: "auto_graded" | "pending_review" | "graded";
+    raw_mark?: number;
     mark?: number;
     passing_mark?: number;
     passed: boolean;
     integrity_status: "clean" | "invalidated";
     review_status: "not_required" | "pending" | "cleared" | "upheld";
+    flagged: boolean;
+    integrity_penalty_applied: boolean;
   };
 };
 
@@ -113,6 +118,8 @@ type StatusPresentation = {
   color: "default" | "primary" | "success" | "warning" | "error";
   icon: ReactElement;
 };
+
+const EXAM_LOAD_TIMEOUTS_MS = [15_000, 45_000] as const;
 
 function channelPresentation(
   status: IntegrityChannelStatus,
@@ -138,32 +145,50 @@ function channelPresentation(
   };
 }
 
-function formatElapsed(
-  startedAt: string | undefined,
-  locale: ExamLocale,
-  now = Date.now(),
-): string {
-  if (!startedAt) return translateExam(locale, "timerUnavailable");
-  if (now === 0) return translateExam(locale, "sessionActive");
-  const total = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1_000));
+function clockTime(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(total / 3_600).toString().padStart(2, "0");
   const minutes = Math.floor((total % 3_600) / 60).toString().padStart(2, "0");
   const seconds = (total % 60).toString().padStart(2, "0");
-  return translateExam(locale, "elapsed", { time: `${hours}:${minutes}:${seconds}` });
+  return `${hours}:${minutes}:${seconds}`;
 }
 
-function useElapsedLabel(
+function formatSessionClock(
   startedAt: string | undefined,
+  deadlineAt: string | undefined,
+  locale: ExamLocale,
+  now = Date.now(),
+): string {
+  if (deadlineAt) {
+    if (now === 0) return translateExam(locale, "sessionActive");
+    const remaining = Math.max(0, Math.ceil((new Date(deadlineAt).getTime() - now) / 1_000));
+    return translateExam(locale, "timeRemaining", { time: clockTime(remaining) });
+  }
+  if (!startedAt) return translateExam(locale, "timerUnavailable");
+  if (now === 0) return translateExam(locale, "sessionActive");
+  const total = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1_000));
+  return translateExam(locale, "elapsed", { time: clockTime(total) });
+}
+
+function useSessionClock(
+  startedAt: string | undefined,
+  deadlineAt: string | undefined,
   active: boolean,
   locale: ExamLocale,
-): string {
+): { label: string; remainingSeconds: number | null } {
   const [now, setNow] = useState(0);
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [active]);
-  return formatElapsed(startedAt, locale, now);
+  const remainingSeconds = deadlineAt && now > 0
+    ? Math.max(0, Math.ceil((new Date(deadlineAt).getTime() - now) / 1_000))
+    : null;
+  return {
+    label: formatSessionClock(startedAt, deadlineAt, locale, now),
+    remainingSeconds,
+  };
 }
 
 function localEligibleTime(nextAttemptAt: string, locale: ExamLocale): string {
@@ -246,8 +271,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [warnings, setWarnings] = useState(0);
-  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [rulesAccepted, setRulesAccepted] = useState(false);
   const [readinessStep, setReadinessStep] = useState(0);
@@ -260,6 +283,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
   const restoreRequestedRef = useRef(false);
   const fullscreenPausedRef = useRef(false);
   const devToolsPausedRef = useRef(false);
+  const timeoutSubmissionRef = useRef(false);
 
   const requestHeaders = useCallback(
     (json = false, token = accessTokenRef.current): HeadersInit => ({
@@ -272,43 +296,57 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
 
   useEffect(() => {
     let active = true;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    let controller: AbortController | null = null;
     const fragment = new URLSearchParams(window.location.hash.slice(1));
-    const token = fragment.get("attempt_token");
-    if (token) {
-      accessTokenRef.current = token;
+    const fragmentToken = fragment.get("attempt_token");
+    if (fragmentToken) {
+      accessTokenRef.current = fragmentToken;
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     }
+    const attemptToken = fragmentToken ?? accessTokenRef.current;
 
-    fetch(`/api/exams/${examId}`, {
-      cache: "no-store",
-      headers: requestHeaders(false, token),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(localizeServerMessage(locale, data.error, "loadExamFallback"));
+    const loadExam = async () => {
+      for (let attempt = 0; attempt < EXAM_LOAD_TIMEOUTS_MS.length; attempt += 1) {
+        controller = new AbortController();
+        const timeoutId = window.setTimeout(
+          () => controller?.abort(),
+          EXAM_LOAD_TIMEOUTS_MS[attempt],
+        );
+        try {
+          const response = await fetch(`/api/exams/${examId}`, {
+            cache: "no-store",
+            headers: requestHeaders(false, attemptToken),
+            signal: controller.signal,
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(localizeServerMessage(locale, data.error, "loadExamFallback"));
+          }
+          if (active) setExam(data);
+          return;
+        } catch (caught: unknown) {
+          const timedOut = caught instanceof DOMException && caught.name === "AbortError";
+          if (timedOut && active && attempt + 1 < EXAM_LOAD_TIMEOUTS_MS.length) continue;
+          if (active) {
+            setError(timedOut
+              ? t("loadExamTimeout")
+              : localizeServerMessage(
+                  locale,
+                  caught instanceof Error ? caught.message : caught,
+                  "loadExamFallback",
+                ));
+          }
+          return;
+        } finally {
+          window.clearTimeout(timeoutId);
         }
-        if (active) setExam(data);
-      })
-      .catch((err: unknown) => {
-        if (active) {
-          setError(err instanceof DOMException && err.name === "AbortError"
-            ? t("loadExamTimeout")
-            : localizeServerMessage(
-                locale,
-                err instanceof Error ? err.message : err,
-                "loadExamFallback",
-              ));
-        }
-      });
+      }
+    };
+    void loadExam();
 
     return () => {
       active = false;
-      window.clearTimeout(timeoutId);
-      controller.abort();
+      controller?.abort();
     };
   }, [examId, locale, requestHeaders, t]);
 
@@ -360,9 +398,10 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     };
   }, [channelStatus, exam, examId, locale, requestHeaders, started, t]);
 
+  // Integrity evidence is recorded silently. Learners see no event count,
+  // accusation, or per-action warning while the attempt is running.
   const onBlockedAction = useCallback((message: string) => {
-    setWarnings((count) => count + 1);
-    setBlockedMessage(message);
+    void message;
   }, []);
 
   const onFullscreenChange = useCallback((active: boolean) => {
@@ -370,30 +409,21 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       fullscreenPausedRef.current = false;
       setFullscreenPaused(false);
       setReadinessMessage(null);
-      setBlockedMessage(null);
       return;
-    }
-    if (!fullscreenPausedRef.current) {
-      onBlockedAction(t("fullscreenRequiredPause"));
     }
     fullscreenPausedRef.current = true;
     setFullscreenPaused(true);
     setConfirmOpen(false);
-  }, [onBlockedAction, t]);
+  }, []);
 
   const onDevToolsChange = useCallback((suspected: boolean) => {
     if (!suspected) {
       devToolsPausedRef.current = false;
       setDevToolsPaused(false);
-      return;
     }
-    if (!devToolsPausedRef.current) {
-      onBlockedAction(t("developerToolsDetected"));
-    }
-    devToolsPausedRef.current = true;
-    setDevToolsPaused(true);
-    setConfirmOpen(false);
-  }, [onBlockedAction, t]);
+    // Detection is evidence only. It is deliberately not announced in the
+    // running exam; repeated signals are handled by the server-side flag rule.
+  }, []);
 
   useExamDeterrents({
     enabled: Boolean(exam && !exam.taken && channelStatus !== "locked"),
@@ -417,12 +447,25 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       }
       if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
       if (!document.fullscreenElement) throw new Error("Fullscreen did not activate.");
+      const response = await fetch(`/api/exams/${examId}/begin`, {
+        method: "POST",
+        headers: requestHeaders(),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(localizeServerMessage(locale, data.error, "examStartFailed"));
+      }
       fullscreenPausedRef.current = false;
       setFullscreenPaused(false);
       setReadinessStep(2);
+      setExam(data);
       setStarted(true);
-    } catch {
-      setReadinessMessage(t("fullscreenCouldNotStart"));
+    } catch (caught: unknown) {
+      setReadinessMessage(localizeServerMessage(
+        locale,
+        caught instanceof Error ? caught.message : caught,
+        "fullscreenCouldNotStart",
+      ));
     }
   }
 
@@ -436,7 +479,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
       if (!document.fullscreenElement) throw new Error("Fullscreen did not activate.");
       fullscreenPausedRef.current = false;
       setFullscreenPaused(false);
-      setBlockedMessage(null);
     } catch {
       setReadinessMessage(t("examRemainsPaused"));
     }
@@ -523,11 +565,58 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     }
   }
 
-  const elapsedLabel = useElapsedLabel(
+  const sessionClock = useSessionClock(
     exam?.started_at,
-    Boolean(started && exam && !exam.taken),
+    exam?.deadline_at,
+    Boolean(exam && !exam.taken && (started || exam.deadline_at)),
     locale,
   );
+
+  useEffect(() => {
+    if (
+      !exam?.deadline_at ||
+      exam.taken ||
+      sessionClock.remainingSeconds !== 0 ||
+      timeoutSubmissionRef.current
+    ) return;
+
+    timeoutSubmissionRef.current = true;
+    const controller = new AbortController();
+    setSubmitting(true);
+    setConfirmOpen(false);
+    setError(null);
+    void fetch(`/api/exams/${examId}/submit`, {
+      method: "POST",
+      headers: requestHeaders(),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(localizeServerMessage(locale, data.error, "timeExpiredSubmissionFailed"));
+        }
+        setExam(data);
+      })
+      .catch((caught: unknown) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        timeoutSubmissionRef.current = false;
+        setError(localizeServerMessage(
+          locale,
+          caught instanceof Error ? caught.message : caught,
+          "timeExpiredSubmissionFailed",
+        ));
+      })
+      .finally(() => setSubmitting(false));
+
+    return () => controller.abort();
+  }, [
+    exam?.deadline_at,
+    exam?.taken,
+    examId,
+    locale,
+    requestHeaders,
+    sessionClock.remainingSeconds,
+  ]);
 
   if (error && !exam) {
     return (
@@ -550,13 +639,14 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
     const result = exam.result;
     const pending = result?.grading_status === "pending_review";
     const invalidated = result?.integrity_status === "invalidated";
+    const adjusted = result?.integrity_penalty_applied === true;
     return (
       <Fade in timeout={225}>
         <Stack spacing={3}>
           <Card variant="outlined">
             <CardContent>
               <Stack spacing={3}>
-                <TaskAltRounded color={invalidated ? "error" : pending ? "info" : "success"} fontSize="large" />
+                <TaskAltRounded color={invalidated ? "error" : adjusted ? "warning" : pending ? "info" : "success"} fontSize="large" />
                 <Stack spacing={1}>
                   <Typography variant="overline">{t("submissionReceived")}</Typography>
                   <Typography
@@ -574,6 +664,14 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                   <Alert severity="error" role="alert">
                     <AlertTitle>{t("resultHeldForReview")}</AlertTitle>
                     {t("reviewStateExplanation")}
+                  </Alert>
+                ) : adjusted && result?.raw_mark !== undefined && result.mark !== undefined ? (
+                  <Alert severity="warning" role="status">
+                    <AlertTitle>{t("flaggedScoreAdjusted")}</AlertTitle>
+                    {t("flaggedScoreExplanation", {
+                      rawScore: result.raw_mark,
+                      recordedScore: result.mark,
+                    })}
                   </Alert>
                 ) : pending ? (
                   <Alert severity="info" role="status">
@@ -855,7 +953,13 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
               </Stack>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                 <Chip icon={connection.icon} label={connection.label} color={connection.color} variant={connection.color === "success" ? "filled" : "outlined"} />
-                <Chip icon={<ScheduleOutlined />} label={elapsedLabel} variant="outlined" aria-label={elapsedLabel} />
+                <Chip
+                  icon={<ScheduleOutlined />}
+                  label={sessionClock.label}
+                  color={sessionClock.remainingSeconds !== null && sessionClock.remainingSeconds <= 60 ? "warning" : "default"}
+                  variant="outlined"
+                  aria-label={sessionClock.label}
+                />
                 <Chip
                   icon={<QuizOutlined />}
                   label={t("questionPosition", {
@@ -878,7 +982,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
             </Stack>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
               <Chip icon={<SecurityRounded />} label={t("integrityMonitoringOn")} color="primary" variant="outlined" />
-              {warnings ? <Chip label={t("blockedActions", { count: warnings })} color="warning" variant="outlined" /> : null}
             </Stack>
           </Stack>
         </CardContent>
@@ -895,12 +998,6 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
             : connectionInterrupted
               ? t("reconnectingDetail")
               : t("connectingDetail")}
-        </Alert>
-      </Collapse>
-      <Collapse in={Boolean(blockedMessage)} timeout={200} unmountOnExit>
-        <Alert severity="warning" role="alert" closeText={t("close")} onClose={() => setBlockedMessage(null)}>
-          <AlertTitle>{t("actionBlockedRecorded")}</AlertTitle>
-          {blockedMessage}
         </Alert>
       </Collapse>
       <Collapse in={Boolean(savedMessage)} timeout={180} unmountOnExit>
@@ -932,7 +1029,7 @@ export default function ExamRunner({ examId, returnUrl, devToken }: Props) {
                       {(question.options ?? []).map((option) => (
                         <FormControlLabel
                           key={option}
-                          value={option.slice(0, 1)}
+                          value={option}
                           control={<Radio />}
                           label={
                             <span dir="auto" className="exam-generated-content">

@@ -3,6 +3,7 @@ import type { IntegrityEventType } from "@/lib/integrity-protocol";
 export type TimelineEvent = {
   event_type: IntegrityEventType;
   occurred_at: Date | string;
+  details?: Record<string, unknown>;
 };
 
 export type MainEffect = {
@@ -49,6 +50,9 @@ export type IntegrityFeatureSummary = {
   repeatedWithinThirtySeconds: number;
   recoveryCount: number;
   heartbeatMissCount: number;
+  shortFocusLossCount: number;
+  longFocusLossCount: number;
+  suspiciousActionCount: number;
 };
 
 export type IntegrityRiskResult = {
@@ -66,9 +70,9 @@ export type IntegrityRiskResult = {
 };
 
 export const provisionalIntegrityModel: ExplainableRiskModel = {
-  version: "univai-integrity-provisional-v2",
-  featureSchemaVersion: "integrity-features-v1",
-  policyVersion: "human-review-v2",
+  version: "univai-integrity-provisional-v4",
+  featureSchemaVersion: "integrity-features-v3",
+  policyVersion: "half-grade-v1",
   calibrationVersion: null,
   mode: "provisional_rules",
   intercept: -3.2,
@@ -146,6 +150,89 @@ function pairOccurrences(
   return count;
 }
 
+type FocusLossSummary = { short: number; long: number };
+
+function focusLossSummary(events: TimelineEvent[]): FocusLossSummary {
+  const ordered = [...events].sort(
+    (left, right) => new Date(left.occurred_at).getTime() - new Date(right.occurred_at).getTime(),
+  );
+  const timelineEnd = ordered.length
+    ? new Date(ordered[ordered.length - 1].occurred_at).getTime()
+    : 0;
+  let short = 0;
+  let long = 0;
+  for (let index = 0; index < ordered.length; index += 1) {
+    const blur = ordered[index];
+    if (blur.event_type !== "window_blur") continue;
+    const later = ordered.slice(index + 1);
+    const nextBlur = later.findIndex((event) => event.event_type === "window_blur");
+    const focus = (nextBlur === -1 ? later : later.slice(0, nextBlur))
+      .find((event) => event.event_type === "window_focus");
+    if (focus) {
+      const reportedMs = Number(focus.details?.blurred_ms);
+      const measuredMs = new Date(focus.occurred_at).getTime() - new Date(blur.occurred_at).getTime();
+      const blurredMs = Number.isFinite(reportedMs) && reportedMs >= 0
+        ? reportedMs
+        : measuredMs;
+      if (blurredMs > 900) long += 1;
+      else short += 1;
+      continue;
+    }
+    if (timelineEnd - new Date(blur.occurred_at).getTime() > 900) long += 1;
+  }
+  return { short, long };
+}
+
+function mainEffectOccurrences(events: TimelineEvent[], event: IntegrityEventType): number {
+  if (event === "window_blur") {
+    const focus = focusLossSummary(events);
+    return focus.long + Math.floor(focus.short / 3);
+  }
+  return events.filter((item) => item.event_type === event).length;
+}
+
+const suspiciousActionTypes = new Set<IntegrityEventType>([
+  "fullscreen_exit",
+  "restricted_shortcut",
+  "context_menu_attempt",
+  "clipboard_copy_attempt",
+  "clipboard_cut_attempt",
+  "clipboard_paste_attempt",
+  "drag_start_attempt",
+  "drop_attempt",
+  "devtools_dimension_suspected",
+  "duplicate_attempt_context",
+  "attempt_storage_changed",
+  "history_navigation_attempt",
+  "print_attempt",
+  "csp_violation",
+  "page_frozen",
+  "heartbeat_missed",
+  "heartbeat_invalid",
+  "telemetry_gap",
+]);
+
+function suspiciousActionCount(events: TimelineEvent[]): number {
+  return events.filter((event) => suspiciousActionTypes.has(event.event_type)).length;
+}
+
+function flagThresholds(features: IntegrityFeatureSummary): {
+  flagged: boolean;
+  highReview: boolean;
+} {
+  const flagged =
+    features.longFocusLossCount >= 1 ||
+    features.shortFocusLossCount >= 3 ||
+    features.suspiciousActionCount >= 3;
+  return {
+    flagged,
+    highReview:
+      features.longFocusLossCount >= 2 ||
+      features.shortFocusLossCount >= 6 ||
+      features.suspiciousActionCount >= 6,
+  };
+}
+
 export function extractIntegrityFeatures(
   events: TimelineEvent[],
   now: Date | string = new Date(),
@@ -187,8 +274,9 @@ export function extractIntegrityFeatures(
 
   const firstAt = ordered.length ? new Date(ordered[0].occurred_at).getTime() : 0;
   const lastAt = ordered.length ? new Date(ordered[ordered.length - 1].occurred_at).getTime() : 0;
+  const focus = focusLossSummary(ordered);
   return {
-    schemaVersion: "integrity-features-v1",
+    schemaVersion: "integrity-features-v3",
     eventCount: ordered.length,
     sessionDurationSeconds: ordered.length > 1 ? Math.max(0, (lastAt - firstAt) / 1_000) : 0,
     counts,
@@ -198,6 +286,9 @@ export function extractIntegrityFeatures(
     repeatedWithinThirtySeconds,
     recoveryCount,
     heartbeatMissCount: counts.heartbeat_missed ?? 0,
+    shortFocusLossCount: focus.short,
+    longFocusLossCount: focus.long,
+    suspiciousActionCount: suspiciousActionCount(ordered),
   };
 }
 
@@ -209,7 +300,7 @@ export function scoreIntegrityTimeline(
   let rawLogit = model.intercept;
 
   for (const effect of model.mainEffects) {
-    const occurrences = events.filter((event) => event.event_type === effect.event).length;
+    const occurrences = mainEffectOccurrences(events, effect.event);
     const value = Math.min(effect.cap, occurrences * effect.perOccurrence);
     if (value !== 0) contributions.push({ kind: "main", feature: effect.event, value, occurrences });
     rawLogit += value;
@@ -234,13 +325,22 @@ export function scoreIntegrityTimeline(
   const probability = model.mode === "calibrated_ebm"
     ? calibratedProbability(uncalibrated, model.calibration ?? [])
     : null;
-  const reviewPriority = Math.round(100 * (probability ?? uncalibrated));
+  const features = extractIntegrityFeatures(events);
+  const thresholds = flagThresholds(features);
+  const baseReviewPriority = Math.round(100 * (probability ?? uncalibrated));
   const hasProtocolFailure = events.some((event) => event.event_type === "heartbeat_invalid");
+  const reviewPriority = hasProtocolFailure
+    ? 100
+    : thresholds.highReview
+      ? Math.max(70, baseReviewPriority)
+      : thresholds.flagged
+        ? Math.max(35, baseReviewPriority)
+        : baseReviewPriority;
   const band = hasProtocolFailure
     ? "protocol_lock"
-    : reviewPriority >= 70
+    : thresholds.highReview
       ? "high_review"
-      : reviewPriority >= 35
+      : thresholds.flagged
         ? "review"
         : "observe";
 
@@ -255,6 +355,6 @@ export function scoreIntegrityTimeline(
     probability,
     band,
     contributions,
-    features: extractIntegrityFeatures(events),
+    features,
   };
 }

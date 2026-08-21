@@ -4,11 +4,23 @@ import { scoreObjectiveAnswers } from "./objective-scoring";
 interface SubmissionGradingTarget {
   type: ExamType;
   generated_questions?: Record<string, unknown>[];
+  raw_mark?: number;
+  integrity_penalty_applied?: boolean;
   mark?: number;
   passing_mark?: number;
   passed: boolean;
   grading_status: GradingStatus;
   integrity_status: IntegrityStatus;
+}
+
+export function integrityAdjustedMark(
+  rawMark: number,
+  type: ExamType,
+  flagged: boolean,
+): number {
+  return flagged && (type === "quiz" || type === "mid")
+    ? Math.ceil(rawMark / 2)
+    : rawMark;
 }
 
 function isObjectiveFinal(exam: SubmissionGradingTarget): boolean {
@@ -28,6 +40,7 @@ function isObjectiveFinal(exam: SubmissionGradingTarget): boolean {
 export function gradeExamSubmission(
   exam: SubmissionGradingTarget,
   studentAnswers: Record<string, unknown>[],
+  options: { flagged?: boolean } = {},
 ): void {
   if (exam.type === "final" && !isObjectiveFinal(exam)) {
     exam.grading_status = "pending_review";
@@ -36,11 +49,15 @@ export function gradeExamSubmission(
 
   const questions = exam.generated_questions ?? [];
   const score = scoreObjectiveAnswers(questions, studentAnswers);
+  const flagged = options.flagged === true;
+  const penaltyApplies = flagged && (exam.type === "quiz" || exam.type === "mid");
 
-  exam.mark = score.mark;
+  exam.raw_mark = score.mark;
+  exam.mark = integrityAdjustedMark(score.mark, exam.type, flagged);
+  exam.integrity_penalty_applied = penaltyApplies;
   exam.passing_mark ??= Math.max(1, Math.ceil(questions.length * 0.6));
   exam.passed =
     exam.integrity_status !== "invalidated" &&
-    score.mark >= exam.passing_mark;
+    exam.mark >= exam.passing_mark;
   exam.grading_status = "auto_graded";
 }

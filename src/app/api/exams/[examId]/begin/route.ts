@@ -1,18 +1,13 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import {
-  answerCurrentQuestionSchema,
+  activateExamTimer,
   examAttemptErrorResponse,
   getExamAttemptView,
   requireExamAttempt,
-  saveCurrentAnswer,
 } from "@/lib/exam-attempt";
-import { examRateLimiter } from "@/lib/rate-limit";
-import {
-  parseJsonBody,
-  requestValidationErrorResponse,
-} from "@/lib/request-validation";
 import { finalizeExpiredTimedExam } from "@/lib/timed-exam";
+import { examRateLimiter } from "@/lib/rate-limit";
 
 export async function POST(
   request: NextRequest,
@@ -26,11 +21,9 @@ export async function POST(
     if (await finalizeExpiredTimedExam(examId)) {
       return Response.json(await getExamAttemptView(examId));
     }
-    const input = await parseJsonBody(request, answerCurrentQuestionSchema);
-    return Response.json(await saveCurrentAnswer(examId, input));
+    return Response.json(await activateExamTimer(examId));
   } catch (error: unknown) {
-    const boundaryResponse = requestValidationErrorResponse(error);
-    if (boundaryResponse) return boundaryResponse;
     return examAttemptErrorResponse(error);
   }
 }
+

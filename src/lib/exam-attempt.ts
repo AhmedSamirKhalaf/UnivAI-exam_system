@@ -10,6 +10,7 @@ import {
   getAttemptPolicySnapshot,
   type AttemptPolicySnapshot,
 } from "@/lib/exam-attempt-policy";
+import { examDeadline, examTimeLimitSeconds } from "@/lib/exam-timing";
 
 export type PublicQuestion = {
   question_id: string;
@@ -25,6 +26,8 @@ export type ExamAttemptView = {
   taken: boolean;
   integrity_status: "clean" | "invalidated";
   started_at?: string;
+  deadline_at?: string;
+  time_limit_seconds?: number;
   current_question: PublicQuestion | null;
   progress: {
     position: number;
@@ -41,11 +44,14 @@ export type ExamAttemptView = {
   attempt_statement?: string;
   result?: {
     grading_status: "auto_graded" | "pending_review" | "graded";
+    raw_mark?: number;
     mark?: number;
     passing_mark?: number;
     passed: boolean;
     integrity_status: "clean" | "invalidated";
     review_status: "not_required" | "pending" | "cleared" | "upheld";
+    flagged: boolean;
+    integrity_penalty_applied: boolean;
   };
 };
 
@@ -202,6 +208,8 @@ export function buildExamAttemptView(
     | "integrity_status"
     | "generated_questions"
     | "grading_status"
+    | "raw_mark"
+    | "integrity_penalty_applied"
     | "mark"
     | "passing_mark"
     | "passed"
@@ -215,7 +223,7 @@ export function buildExamAttemptView(
     | "status"
     | "integrity_state"
     | "integrity_lock_reason"
-  > & { started_at?: Date }) | null,
+  > & { started_at?: Date; deadline_at?: Date; flagged?: boolean }) | null,
   attemptPolicy?: AttemptPolicySnapshot,
 ): ExamAttemptView {
   const questions = (exam.generated_questions ?? []) as Record<string, unknown>[];
@@ -224,6 +232,7 @@ export function buildExamAttemptView(
     questions.length,
   );
   const integrityState = session?.integrity_state ?? (exam.taken ? "submitted" : "active");
+  const timeLimitSeconds = examTimeLimitSeconds(exam.type, questions.length);
   const active =
     !exam.taken &&
     session?.status === "in_progress" &&
@@ -236,6 +245,8 @@ export function buildExamAttemptView(
     taken: exam.taken,
     integrity_status: exam.integrity_status,
     ...(session?.started_at ? { started_at: session.started_at.toISOString() } : {}),
+    ...(session?.deadline_at ? { deadline_at: session.deadline_at.toISOString() } : {}),
+    ...(timeLimitSeconds !== null ? { time_limit_seconds: timeLimitSeconds } : {}),
     current_question: active && index < questions.length
       ? publicQuestion(questions[index])
       : null,
@@ -260,15 +271,62 @@ export function buildExamAttemptView(
       ? {
           result: {
             grading_status: exam.grading_status,
+            ...(exam.raw_mark !== undefined ? { raw_mark: exam.raw_mark } : {}),
             ...(exam.mark !== undefined ? { mark: exam.mark } : {}),
             ...(exam.passing_mark !== undefined ? { passing_mark: exam.passing_mark } : {}),
             passed: exam.passed,
             integrity_status: exam.integrity_status,
             review_status: exam.review_status,
+            flagged: session?.flagged ?? false,
+            integrity_penalty_applied: exam.integrity_penalty_applied ?? false,
           },
         }
       : {}),
   };
+}
+
+export async function activateExamTimer(
+  examId: string | mongoose.Types.ObjectId,
+  now: Date = new Date(),
+): Promise<ExamAttemptView> {
+  const exam = await Exam.findById(examId);
+  if (!exam) throw new ExamAttemptError("Exam not found", 404);
+  if (exam.taken) return getExamAttemptView(exam._id);
+
+  const limit = examTimeLimitSeconds(
+    exam.type,
+    exam.generated_questions?.length ?? 0,
+  );
+  if (limit === null) return getExamAttemptView(exam._id);
+
+  const deadline = examDeadline(
+    exam.type,
+    exam.generated_questions?.length ?? 0,
+    now,
+  );
+  if (!deadline) throw new ExamAttemptError("Exam timing is unavailable", 409);
+
+  const session = await ExamSession.findOneAndUpdate(
+    {
+      exam_id: exam._id,
+      status: "in_progress",
+      deadline_at: { $exists: false },
+    },
+    {
+      $set: {
+        started_at: now,
+        deadline_at: deadline,
+      },
+    },
+    { returnDocument: "after", runValidators: true },
+  );
+  if (!session) {
+    const existing = await ExamSession.findOne({ exam_id: exam._id });
+    if (!existing || existing.status !== "in_progress") {
+      throw new ExamAttemptError("Exam session is not active", 409);
+    }
+  }
+  return getExamAttemptView(exam._id);
 }
 
 function attemptStatementFor(policy: AttemptPolicySnapshot): string {
